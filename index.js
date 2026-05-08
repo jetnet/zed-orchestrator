@@ -54,6 +54,18 @@ const notifyAvailableCommands = sessionId =>
     },
   });
 
+const scheduleAvailableCommands = sessionId => {
+  // Zed inserts the session into its foreground session map after session/new
+  // resolves. Immediate post-response notifications can race that insertion
+  // and be dropped as "unknown session", so publish after a short delay and
+  // repeat once for older/slower clients.
+  for (const delayMs of [100, 1000]) {
+    setTimeout(() => {
+      if (sessions.has(sessionId)) notifyAvailableCommands(sessionId);
+    }, delayMs);
+  }
+};
+
 // ─── Zed RPC (proxied child requests) ────────────────────────────────────────
 
 const pendingZedRequests = new Map();
@@ -138,7 +150,7 @@ rl.on('line', async line => {
     });
     log(`Session created: ${sessionId}, group=${DEFAULT_GROUP}`);
     reply(msg.id, { sessionId });
-    notifyAvailableCommands(sessionId);
+    scheduleAvailableCommands(sessionId);
 
   } else if (msg.method === 'session/prompt') {
     const { sessionId, prompt } = msg.params;
