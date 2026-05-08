@@ -1,0 +1,148 @@
+{
+  "$schema": "../agents.config.schema.json",
+  "maxTurns": 5,
+  "agentTimeoutMs": 120000,
+  "concurrency": 4,
+  "defaultGroup": "plan",
+  "workflow": ["plan"],
+  "agentGroups": {
+    "plan": {
+      "description": "Read-only planning through Claude ACP using models selected by PLAN_* env vars.",
+      "strategy": "parallel_reports",
+      "persist": true,
+      "permissions": { "readFiles": true, "writeFiles": false, "terminal": false, "mcp": false },
+      "reviewerPermissions": { "readFiles": true, "writeFiles": false, "terminal": false, "mcp": false },
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 5,
+      "subAgents": [
+        {
+          "name": "Claude (Plan)",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "rateLimitKey": "claude-plan",
+          "credHome": "~/.local/share/zed-orchestrator/claude-plan",
+          "env": {
+            "ANTHROPIC_MODEL": "{env:PLAN_ANTHROPIC_MODEL}",
+            "CLAUDE_CODE_EFFORT_LEVEL": "{env:PLAN_CLAUDE_CODE_EFFORT_LEVEL}"
+          },
+          "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+        }
+      ],
+      "reviewer": {
+        "name": "Claude (Plan Reviewer)",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@agentclientprotocol/claude-agent-acp@0.32.0",
+          "claude-agent-acp"
+        ],
+        "rateLimitKey": "claude-plan-review",
+        "credHome": "~/.local/share/zed-orchestrator/claude-plan-review",
+        "env": {
+          "ANTHROPIC_MODEL": "{env:REVIEW_ANTHROPIC_MODEL}",
+          "CLAUDE_CODE_EFFORT_LEVEL": "{env:REVIEW_CLAUDE_CODE_EFFORT_LEVEL}"
+        },
+        "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+      }
+    },
+    "code": {
+      "description": "Single Claude ACP implementation writer using CODE_* env vars; invoke explicitly after plan approval.",
+      "strategy": "single_writer",
+      "persist": false,
+      "writer": "Claude (Code Writer)",
+      "attachApprovedPlanFrom": "plan",
+      "permissions": "writer_only",
+      "writerPermissions": { "readFiles": true, "writeFiles": true, "terminal": true, "mcp": true },
+      "reviewerPermissions": "read_only",
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 4,
+      "subAgents": [
+        {
+          "name": "Claude (Code Writer)",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "rateLimitKey": "claude-code-writer",
+          "credHome": "~/.local/share/zed-orchestrator/claude-code",
+          "env": {
+            "ANTHROPIC_MODEL": "{env:CODE_ANTHROPIC_MODEL}",
+            "CLAUDE_CODE_EFFORT_LEVEL": "{env:CODE_CLAUDE_CODE_EFFORT_LEVEL}"
+          },
+          "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+        }
+      ],
+      "reviewer": {
+        "name": "Claude (Code Reviewer)",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@agentclientprotocol/claude-agent-acp@0.32.0",
+          "claude-agent-acp"
+        ],
+        "rateLimitKey": "claude-code-review",
+        "credHome": "~/.local/share/zed-orchestrator/claude-code-review",
+        "env": {
+          "ANTHROPIC_MODEL": "{env:REVIEW_ANTHROPIC_MODEL}",
+          "CLAUDE_CODE_EFFORT_LEVEL": "{env:REVIEW_CLAUDE_CODE_EFFORT_LEVEL}"
+        },
+        "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+      }
+    },
+    "review": {
+      "description": "Read-only Claude ACP review pass using REVIEW_* env vars.",
+      "strategy": "parallel_reports",
+      "persist": false,
+      "permissions": { "readFiles": true, "writeFiles": false, "terminal": false, "mcp": false },
+      "reviewerPermissions": { "readFiles": true, "writeFiles": false, "terminal": false, "mcp": false },
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 3,
+      "subAgents": [
+        {
+          "name": "Claude (Review 1)",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "rateLimitKey": "claude-review-1",
+          "credHome": "~/.local/share/zed-orchestrator/claude-review-1",
+          "env": {
+            "ANTHROPIC_MODEL": "{env:REVIEW_ANTHROPIC_MODEL}",
+            "CLAUDE_CODE_EFFORT_LEVEL": "{env:REVIEW_CLAUDE_CODE_EFFORT_LEVEL}"
+          },
+          "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+        }
+      ],
+      "reviewer": {
+        "name": "Claude (Final Reviewer)",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@agentclientprotocol/claude-agent-acp@0.32.0",
+          "claude-agent-acp"
+        ],
+        "rateLimitKey": "claude-final-review",
+        "credHome": "~/.local/share/zed-orchestrator/claude-final-review",
+        "env": {
+          "ANTHROPIC_MODEL": "{env:REVIEW_ANTHROPIC_MODEL}",
+          "CLAUDE_CODE_EFFORT_LEVEL": "{env:REVIEW_CLAUDE_CODE_EFFORT_LEVEL}"
+        },
+        "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+      }
+    }
+  }
+}

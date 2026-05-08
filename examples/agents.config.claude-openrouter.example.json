@@ -1,0 +1,290 @@
+{
+  "$schema": "../agents.config.schema.json",
+  "maxTurns": 5,
+  "agentTimeoutMs": 240000,
+  "maxRetries": 2,
+  "retryDelayMs": 5000,
+  "heartbeatMs": 30000,
+  "maxOutputBytes": 12582912,
+  "reviewerAgentChars": 60000,
+  "concurrency": 3,
+  "probeTimeoutMs": 30000,
+  "envIsolation": true,
+  "defaultGroup": "plan",
+  "workflow": [
+    "plan"
+  ],
+  "rateLimits": {
+    "openrouter-claude": {
+      "requestsPerMinute": 8,
+      "burstSize": 3
+    },
+    "openrouter-claude-opus": {
+      "requestsPerMinute": 4,
+      "burstSize": 2
+    },
+    "openrouter-claude-sonnet": {
+      "requestsPerMinute": 8,
+      "burstSize": 3
+    },
+    "openrouter-claude-haiku": {
+      "requestsPerMinute": 12,
+      "burstSize": 4
+    }
+  },
+  "agentGroups": {
+    "plan": {
+      "description": "Parallel read-only planning through Claude ACP adapters, each forced to a different OpenRouter Claude model by env.",
+      "strategy": "parallel_reports",
+      "persist": true,
+      "permissions": "read_only",
+      "reviewerPermissions": "read_only",
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 5,
+      "concurrency": 3,
+      "subAgents": [
+        {
+          "name": "Claude ACP planner - Opus 4.7",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-opus-planner",
+          "rateLimitKey": "openrouter-claude-opus",
+          "passEnv": [
+            "OPENROUTER_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY"
+          ],
+          "env": {
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.7",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-opus-4.7",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-opus-4.7",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-opus-4.7"
+          }
+        },
+        {
+          "name": "Claude ACP planner - Sonnet 4.6",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-sonnet-planner",
+          "rateLimitKey": "openrouter-claude-sonnet",
+          "passEnv": [
+            "OPENROUTER_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY"
+          ],
+          "env": {
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-sonnet-4.6",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-4.6",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-sonnet-4.6",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-sonnet-4.6"
+          }
+        },
+        {
+          "name": "Claude ACP planner - Haiku 4.5",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-haiku-planner",
+          "rateLimitKey": "openrouter-claude-haiku",
+          "passEnv": [
+            "OPENROUTER_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY"
+          ],
+          "env": {
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-haiku-4.5",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-haiku-4.5",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-haiku-4.5",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-haiku-4.5"
+          }
+        }
+      ],
+      "reviewer": {
+        "name": "Claude ACP reviewer - Opus 4.7",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@agentclientprotocol/claude-agent-acp@0.32.0",
+          "claude-agent-acp"
+        ],
+        "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-opus-reviewer",
+        "rateLimitKey": "openrouter-claude-opus",
+        "passEnv": [
+          "OPENROUTER_API_KEY",
+          "ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN",
+          "ANTHROPIC_API_KEY"
+        ],
+        "env": {
+          "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.7",
+          "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-opus-4.7",
+          "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-opus-4.7",
+          "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-opus-4.7"
+        }
+      }
+    },
+    "code": {
+      "description": "Single-writer implementation through Claude ACP Sonnet. Invoke explicitly with /code after approving a plan.",
+      "strategy": "single_writer",
+      "persist": false,
+      "writer": "Claude ACP writer - Sonnet 4.6",
+      "writerPermissions": "writer_only",
+      "reviewerPermissions": "read_only",
+      "attachApprovedPlanFrom": "plan",
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 4,
+      "subAgents": [
+        {
+          "name": "Claude ACP writer - Sonnet 4.6",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-sonnet-writer",
+          "rateLimitKey": "openrouter-claude-sonnet",
+          "passEnv": [
+            "OPENROUTER_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY"
+          ],
+          "env": {
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-sonnet-4.6",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-4.6",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-sonnet-4.6",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-sonnet-4.6"
+          }
+        }
+      ],
+      "reviewer": {
+        "name": "Claude ACP code reviewer - Opus 4.7",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@agentclientprotocol/claude-agent-acp@0.32.0",
+          "claude-agent-acp"
+        ],
+        "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-opus-code-reviewer",
+        "rateLimitKey": "openrouter-claude-opus",
+        "passEnv": [
+          "OPENROUTER_API_KEY",
+          "ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN",
+          "ANTHROPIC_API_KEY"
+        ],
+        "env": {
+          "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.7",
+          "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-opus-4.7",
+          "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-opus-4.7",
+          "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-opus-4.7"
+        }
+      }
+    },
+    "review": {
+      "description": "Read-only final review through Claude ACP agents.",
+      "strategy": "parallel_reports",
+      "persist": false,
+      "permissions": "read_only",
+      "reviewerPermissions": "read_only",
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 3,
+      "concurrency": 2,
+      "subAgents": [
+        {
+          "name": "Claude ACP reviewer pass - Opus 4.7",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-opus-final-review",
+          "rateLimitKey": "openrouter-claude-opus",
+          "passEnv": [
+            "OPENROUTER_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY"
+          ],
+          "env": {
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.7",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-opus-4.7",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-opus-4.7",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-opus-4.7"
+          }
+        },
+        {
+          "name": "Claude ACP reviewer pass - Sonnet 4.6",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@agentclientprotocol/claude-agent-acp@0.32.0",
+            "claude-agent-acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-sonnet-final-review",
+          "rateLimitKey": "openrouter-claude-sonnet",
+          "passEnv": [
+            "OPENROUTER_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY"
+          ],
+          "env": {
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-sonnet-4.6",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-4.6",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-sonnet-4.6",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-sonnet-4.6"
+          }
+        }
+      ],
+      "reviewer": {
+        "name": "Claude ACP review arbiter - Opus 4.7",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@agentclientprotocol/claude-agent-acp@0.32.0",
+          "claude-agent-acp"
+        ],
+        "credHome": "~/.local/share/zed-orchestrator/claude-openrouter-opus-review-arbiter",
+        "rateLimitKey": "openrouter-claude-opus",
+        "passEnv": [
+          "OPENROUTER_API_KEY",
+          "ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN",
+          "ANTHROPIC_API_KEY"
+        ],
+        "env": {
+          "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.7",
+          "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-opus-4.7",
+          "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-opus-4.7",
+          "CLAUDE_CODE_SUBAGENT_MODEL": "anthropic/claude-opus-4.7"
+        }
+      }
+    }
+  }
+}

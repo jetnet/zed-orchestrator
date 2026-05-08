@@ -1,0 +1,161 @@
+{
+    "$schema": "../agents.config.schema.json",
+    "maxTurns": 5,
+    "agentTimeoutMs": 120000,
+    "concurrency": 4,
+    "defaultGroup": "plan",
+    "workflow": ["plan"],
+    "agentGroups": {
+        "plan": {
+            "description": "Read-only planning through Kilo Code using the model from KILO_PLAN_MODEL.",
+            "strategy": "parallel_reports",
+            "persist": true,
+            "permissions": {
+                "readFiles": true,
+                "writeFiles": false,
+                "terminal": false,
+                "mcp": false
+            },
+            "artifactDir": ".plan/orchestrator",
+            "maxTurns": 5,
+            "subAgents": [
+                {
+                    "name": "Kilo (Plan)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@kilocode/cli@1.0.0",
+                        "kilo",
+                        "--model",
+                        "{env:KILO_PLAN_MODEL}",
+                        "acp"
+                    ],
+                    "rateLimitKey": "kilo-plan",
+                    "credHome": "~/.local/share/zed-orchestrator/kilo-plan",
+                    "env": {},
+                    "passEnv": ["KILO_API_KEY"]
+                }
+            ],
+            "reviewer": {
+                "name": "Kilo (Plan Reviewer)",
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package",
+                    "@kilocode/cli@1.0.0",
+                    "kilo",
+                    "--model",
+                    "{env:KILO_REVIEW_MODEL}",
+                    "acp"
+                ],
+                "rateLimitKey": "kilo-review",
+                "credHome": "~/.local/share/zed-orchestrator/kilo-review",
+                "env": {},
+                "passEnv": ["KILO_API_KEY"]
+            }
+        },
+        "code": {
+            "description": "Single Kilo Code implementation writer using KILO_CODE_MODEL; invoke explicitly after plan approval.",
+            "strategy": "single_writer",
+            "persist": false,
+            "writer": "Kilo (Code Writer)",
+            "attachApprovedPlanFrom": "plan",
+            "permissions": "writer_only",
+            "writerPermissions": {
+                "readFiles": true,
+                "writeFiles": true,
+                "terminal": true,
+                "mcp": true
+            },
+            "reviewerPermissions": "read_only",
+            "artifactDir": ".plan/orchestrator",
+            "maxTurns": 4,
+            "subAgents": [
+                {
+                    "name": "Kilo (Code Writer)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@kilocode/cli@1.0.0",
+                        "kilo",
+                        "--model",
+                        "{env:KILO_CODE_MODEL}",
+                        "acp"
+                    ],
+                    "rateLimitKey": "kilo-code-writer",
+                    "credHome": "~/.local/share/zed-orchestrator/kilo-code",
+                    "env": {},
+                    "passEnv": ["KILO_API_KEY"]
+                }
+            ],
+            "reviewer": {
+                "name": "Kilo (Code Reviewer)",
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package",
+                    "@kilocode/cli@1.0.0",
+                    "kilo",
+                    "--model",
+                    "{env:KILO_REVIEW_MODEL}",
+                    "acp"
+                ],
+                "rateLimitKey": "kilo-code-review",
+                "credHome": "~/.local/share/zed-orchestrator/kilo-code-review",
+                "env": {},
+                "passEnv": ["KILO_API_KEY"]
+            }
+        },
+        "review": {
+            "description": "Read-only Kilo Code review pass using KILO_REVIEW_MODEL.",
+            "strategy": "parallel_reports",
+            "persist": false,
+            "permissions": {
+                "readFiles": true,
+                "writeFiles": false,
+                "terminal": false,
+                "mcp": false
+            },
+            "artifactDir": ".plan/orchestrator",
+            "maxTurns": 3,
+            "subAgents": [
+                {
+                    "name": "Kilo (Reviewer A)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@kilocode/cli@1.0.0",
+                        "kilo",
+                        "--model",
+                        "{env:KILO_REVIEW_MODEL}",
+                        "acp"
+                    ],
+                    "rateLimitKey": "kilo-review-1",
+                    "credHome": "~/.local/share/zed-orchestrator/kilo-review-1",
+                    "env": {},
+                    "passEnv": ["KILO_API_KEY"]
+                }
+            ],
+            "reviewer": {
+                "name": "Kilo (Final Reviewer)",
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package",
+                    "@kilocode/cli@1.0.0",
+                    "kilo",
+                    "--model",
+                    "{env:KILO_REVIEW_MODEL}",
+                    "acp"
+                ],
+                "rateLimitKey": "kilo-final-review",
+                "credHome": "~/.local/share/zed-orchestrator/kilo-final-review",
+                "env": {},
+                "passEnv": ["KILO_API_KEY"]
+            }
+        }
+    }
+}

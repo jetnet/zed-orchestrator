@@ -1,0 +1,254 @@
+{
+  "$schema": "../agents.config.schema.json",
+  "maxTurns": 5,
+  "agentTimeoutMs": 240000,
+  "maxRetries": 2,
+  "retryDelayMs": 5000,
+  "heartbeatMs": 30000,
+  "maxOutputBytes": 12582912,
+  "reviewerAgentChars": 60000,
+  "concurrency": 3,
+  "probeTimeoutMs": 30000,
+  "envIsolation": true,
+  "defaultGroup": "plan",
+  "workflow": [
+    "plan"
+  ],
+  "rateLimits": {
+    "openrouter-kilo": {
+      "requestsPerMinute": 8,
+      "burstSize": 3
+    },
+    "openrouter-kilo-opus": {
+      "requestsPerMinute": 4,
+      "burstSize": 2
+    },
+    "openrouter-kilo-sonnet": {
+      "requestsPerMinute": 8,
+      "burstSize": 3
+    },
+    "openrouter-kilo-minimax": {
+      "requestsPerMinute": 8,
+      "burstSize": 3
+    }
+  },
+  "agentGroups": {
+    "plan": {
+      "description": "Parallel read-only planning through Kilo Code ACP. Each Kilo process receives a different KILO_CONFIG_CONTENT model config.",
+      "strategy": "parallel_reports",
+      "persist": true,
+      "permissions": "read_only",
+      "reviewerPermissions": "read_only",
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 5,
+      "concurrency": 3,
+      "subAgents": [
+        {
+          "name": "Kilo planner - Claude Opus 4.7",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@kilocode/cli@7.2.40",
+            "kilo",
+            "acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-opus-planner",
+          "rateLimitKey": "openrouter-kilo-opus",
+          "passEnv": [
+            "OPENROUTER_API_KEY"
+          ],
+          "env": {
+            "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/anthropic/claude-opus-4.7\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"anthropic/claude-opus-4.7\":{\"name\":\"Claude Opus 4.7 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+            "KILO_DISABLE_PROJECT_CONFIG": "1"
+          }
+        },
+        {
+          "name": "Kilo planner - Claude Sonnet 4.6",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@kilocode/cli@7.2.40",
+            "kilo",
+            "acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-sonnet-planner",
+          "rateLimitKey": "openrouter-kilo-sonnet",
+          "passEnv": [
+            "OPENROUTER_API_KEY"
+          ],
+          "env": {
+            "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/anthropic/claude-sonnet-4.6\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"anthropic/claude-sonnet-4.6\":{\"name\":\"Claude Sonnet 4.6 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+            "KILO_DISABLE_PROJECT_CONFIG": "1"
+          }
+        },
+        {
+          "name": "Kilo planner - MiniMax M2.7",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@kilocode/cli@7.2.40",
+            "kilo",
+            "acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-minimax-planner",
+          "rateLimitKey": "openrouter-kilo-minimax",
+          "passEnv": [
+            "OPENROUTER_API_KEY"
+          ],
+          "env": {
+            "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/minimax/minimax-m2.7\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"minimax/minimax-m2.7\":{\"name\":\"MiniMax M2.7 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+            "KILO_DISABLE_PROJECT_CONFIG": "1"
+          }
+        }
+      ],
+      "reviewer": {
+        "name": "Kilo reviewer - Claude Opus 4.7",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@kilocode/cli@7.2.40",
+          "kilo",
+          "acp"
+        ],
+        "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-opus-reviewer",
+        "rateLimitKey": "openrouter-kilo-opus",
+        "passEnv": [
+          "OPENROUTER_API_KEY"
+        ],
+        "env": {
+          "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/anthropic/claude-opus-4.7\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"anthropic/claude-opus-4.7\":{\"name\":\"Claude Opus 4.7 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+          "KILO_DISABLE_PROJECT_CONFIG": "1"
+        }
+      }
+    },
+    "code": {
+      "description": "Single-writer implementation through Kilo Code Sonnet. Invoke explicitly with /code after approving a plan.",
+      "strategy": "single_writer",
+      "persist": false,
+      "writer": "Kilo writer - Claude Sonnet 4.6",
+      "writerPermissions": "writer_only",
+      "reviewerPermissions": "read_only",
+      "attachApprovedPlanFrom": "plan",
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 4,
+      "subAgents": [
+        {
+          "name": "Kilo writer - Claude Sonnet 4.6",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@kilocode/cli@7.2.40",
+            "kilo",
+            "acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-sonnet-writer",
+          "rateLimitKey": "openrouter-kilo-sonnet",
+          "passEnv": [
+            "OPENROUTER_API_KEY"
+          ],
+          "env": {
+            "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/anthropic/claude-sonnet-4.6\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"anthropic/claude-sonnet-4.6\":{\"name\":\"Claude Sonnet 4.6 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+            "KILO_DISABLE_PROJECT_CONFIG": "1"
+          }
+        }
+      ],
+      "reviewer": {
+        "name": "Kilo code reviewer - Claude Opus 4.7",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@kilocode/cli@7.2.40",
+          "kilo",
+          "acp"
+        ],
+        "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-opus-code-reviewer",
+        "rateLimitKey": "openrouter-kilo-opus",
+        "passEnv": [
+          "OPENROUTER_API_KEY"
+        ],
+        "env": {
+          "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/anthropic/claude-opus-4.7\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"anthropic/claude-opus-4.7\":{\"name\":\"Claude Opus 4.7 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+          "KILO_DISABLE_PROJECT_CONFIG": "1"
+        }
+      }
+    },
+    "review": {
+      "description": "Read-only final review through Kilo Code ACP agents.",
+      "strategy": "parallel_reports",
+      "persist": false,
+      "permissions": "read_only",
+      "reviewerPermissions": "read_only",
+      "artifactDir": ".plan/orchestrator",
+      "maxTurns": 3,
+      "concurrency": 2,
+      "subAgents": [
+        {
+          "name": "Kilo final review - Claude Opus 4.7",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@kilocode/cli@7.2.40",
+            "kilo",
+            "acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-opus-final-review",
+          "rateLimitKey": "openrouter-kilo-opus",
+          "passEnv": [
+            "OPENROUTER_API_KEY"
+          ],
+          "env": {
+            "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/anthropic/claude-opus-4.7\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"anthropic/claude-opus-4.7\":{\"name\":\"Claude Opus 4.7 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+            "KILO_DISABLE_PROJECT_CONFIG": "1"
+          }
+        },
+        {
+          "name": "Kilo final review - MiniMax M2.7",
+          "command": "npx",
+          "args": [
+            "--yes",
+            "--package",
+            "@kilocode/cli@7.2.40",
+            "kilo",
+            "acp"
+          ],
+          "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-minimax-final-review",
+          "rateLimitKey": "openrouter-kilo-minimax",
+          "passEnv": [
+            "OPENROUTER_API_KEY"
+          ],
+          "env": {
+            "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/minimax/minimax-m2.7\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"minimax/minimax-m2.7\":{\"name\":\"MiniMax M2.7 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+            "KILO_DISABLE_PROJECT_CONFIG": "1"
+          }
+        }
+      ],
+      "reviewer": {
+        "name": "Kilo review arbiter - Claude Opus 4.7",
+        "command": "npx",
+        "args": [
+          "--yes",
+          "--package",
+          "@kilocode/cli@7.2.40",
+          "kilo",
+          "acp"
+        ],
+        "credHome": "~/.local/share/zed-orchestrator/kilo-openrouter-opus-review-arbiter",
+        "rateLimitKey": "openrouter-kilo-opus",
+        "passEnv": [
+          "OPENROUTER_API_KEY"
+        ],
+        "env": {
+          "KILO_CONFIG_CONTENT": "{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"openrouter/anthropic/claude-opus-4.7\",\"small_model\":\"openrouter/anthropic/claude-haiku-4.5\",\"experimental\":{\"openTelemetry\":false},\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"anthropic/claude-opus-4.7\":{\"name\":\"Claude Opus 4.7 via OpenRouter\",\"tool_call\":true,\"reasoning\":true,\"limit\":{\"context\":200000,\"output\":32768}},\"anthropic/claude-haiku-4.5\":{\"name\":\"Claude Haiku 4.5\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":8192}}}}}}",
+          "KILO_DISABLE_PROJECT_CONFIG": "1"
+        }
+      }
+    }
+  }
+}
