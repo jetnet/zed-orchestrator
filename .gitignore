@@ -8,6 +8,7 @@ agents.config.local.json
 .claude/
 .env
 .env.*
+!examples/.env.example
 
 # npm
 npm-debug.log*
