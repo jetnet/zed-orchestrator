@@ -305,6 +305,7 @@ Full reference for `agents.config.json`:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
+| `$schema` | string | — | Optional JSON Schema path for editor validation |
 | `defaultGroup` | string | first group | Initial group for each new session |
 | `workflow` | string[] | `[defaultGroup]` | Ordered progression after approval |
 | `maxTurns` | int | 5 | Max review rounds before giving up |
@@ -314,6 +315,7 @@ Full reference for `agents.config.json`:
 | `maxRetries` | int | 3 | Retries on transient failures (429, 503, timeouts) |
 | `retryDelayMs` | int | 5000 | Base exponential-backoff delay |
 | `heartbeatMs` | int | 30000 | Ping interval while agent is working. 0 = off |
+| `maxRetryAfterMs` | int | 300000 | Max sleep accepted from upstream retry-after messages |
 | `envIsolation` | bool | true | Sub-agents see only `SAFE_ENV_KEYS` + `passEnv` |
 | `maxLineBytes` | int | 4194304 | Max bytes for a single RPC line (OOM guard) |
 | `maxOutputBytes` | int | 10485760 | Max total streamed or direct final text output per agent (OOM guard) |
@@ -321,30 +323,61 @@ Full reference for `agents.config.json`:
 | `artifactDir` | string | `.plan/orchestrator` | Workspace-relative artifact root |
 | `mcpServers` | array | [] | MCP servers merged with Zed-provided servers and filtered by child capabilities |
 | `rateLimits` | object | {} | Token-bucket limits keyed by command or `rateLimitKey` |
+| `subAgents` | array | — | Legacy default-group agent specs; use `agentGroups` for new configs |
+| `reviewer` | object | — | Legacy reviewer spec, also used as a fallback for groups without `reviewer` |
 | `agentGroups` | object | — | Named groups (`plan`, `code`, `review`, …) |
+
+### Rate limit fields
+
+`rateLimits` is an object keyed by bucket name. A bucket is selected by an agent's
+`rateLimitKey`; when `rateLimitKey` is absent, the agent's `command` is used instead. The key is
+just a stable string. Use a provider/model slug when the quota is model-specific, such as
+`kilo-minimax-m2.7`; use a command name when the quota applies to every invocation of that
+command.
+
+| Field | Type | Description |
+|---|---|---|
+| `requestsPerMinute` | number | Average allowed starts per minute for this bucket |
+| `burstSize` | int | Optional initial/max token count for short bursts. Defaults to `requestsPerMinute` |
+
+### MCP server fields
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `http` for URL servers or `stdio` for child-process servers |
+| `name` | string | Server name forwarded to child agents |
+| `url` | string | Required HTTP MCP endpoint when `type: "http"` |
+| `command` | string | Required executable when `type: "stdio"` |
+| `args` | string[] | Arguments for a stdio MCP server command |
+| `env` | array | Stdio env entries as `{ "name": "...", "value": "..." }`; values support env placeholders |
+| `headers` | array | HTTP header entries as `{ "name": "...", "value": "..." }`; empty bearer-token headers are dropped |
+| `name` / `value` | string | Entry fields inside `env` and `headers`; `name` is the env/header name and `value` is the forwarded value |
 
 ### Agent spec fields
 
 | Field | Type | Description |
 |---|---|---|
 | `name` | string | Display name |
-| `command` | string | Executable |
-| `args` | string[] | CLI arguments |
+| `command` | string | Executable. String values support `{env:VAR}` / `${VAR}` expansion |
+| `args` | string[] | CLI arguments. String values support `{env:VAR}` / `${VAR}` expansion |
 | `sandboxCommand` | string | Optional wrapper executable. The real `command` and `args` are appended after `sandboxArgs`. |
 | `sandboxArgs` | string[] | Arguments passed to `sandboxCommand` before the real agent command. |
-| `env` | object | Extra env vars set for this agent |
+| `env` | object | Extra env vars set for this agent. Values support `{env:VAR}` / `${VAR}` expansion |
 | `passEnv` | string[] | Env keys forwarded from orchestrator env when `envIsolation: true` |
 | `credHome` | string | Workspace-relative, absolute, or `~/...` path used as `HOME` for this agent. Gives each agent its own credential directory, preventing one provider's auth files from being read by another agent. |
 | `allowRealHome` | bool | Explicitly forward the real `HOME`/XDG dirs when `envIsolation: true` and `credHome` is unset |
-| `rateLimitKey` | string | Override the rate-limit bucket key (default: `command`) |
+| `rateLimitKey` | string | Select the matching `rateLimits` bucket. Use the same key for agents that share a provider/model quota. Default: `command` |
 | `agentTimeoutMs` | int | Per-agent override |
 | `maxRetries` | int | Per-agent override |
+| `retryDelayMs` | int | Per-agent retry backoff override |
+| `heartbeatMs` | int | Per-agent heartbeat interval override |
 | `envIsolation` | bool | Per-agent override |
 
 ### Group spec fields
 
 | Field | Type | Description |
 |---|---|---|
+| `description` | string | Human-readable group purpose shown in config and useful for operators |
 | `strategy` | string | `"parallel_reports"` or `"single_writer"` |
 | `persist` | bool | When `false`, reset to `defaultGroup` after the prompt. Defaults to `false` for `single_writer`, `true` otherwise. |
 | `permissions` | string \| object | Default ACP policy for all agents in this group |
@@ -357,6 +390,16 @@ Full reference for `agents.config.json`:
 | `artifactDir` | string | Group-level override |
 | `subAgents` | array | Agent specs |
 | `reviewer` | object | Reviewer agent spec |
+
+### Permission object fields
+
+| Field | Type | Description |
+|---|---|---|
+| `readFiles` | bool | Allow proxied ACP file-read requests |
+| `writeFiles` | bool | Allow proxied ACP file-write requests |
+| `terminal` | bool | Allow proxied ACP terminal requests |
+| `mcp` | bool | Forward MCP servers to agents when child capabilities allow them |
+| `allowUnknownClientRequests` | bool | Forward unknown ACP client methods. Keep `false` in read-only groups |
 
 ### Permission policies
 
@@ -433,6 +476,25 @@ unless `allowRealHome: true` is set on that agent. Prefer `credHome` or explicit
 entries over `allowRealHome`.
 
 ### Env isolation
+
+String values in `agents.config.json` support `{env:VAR}` and `${VAR}` placeholders. Before the
+config is expanded, the orchestrator loads a `.env` file from the same directory as the active
+config file (`ORCHESTRATOR_CONFIG`, or the default `agents.config.json`). Existing shell
+environment variables take precedence over `.env` values.
+
+```dotenv
+PLAN_MODEL=gemini-3.1-pro-preview
+OPENROUTER_API_KEY=...
+```
+
+```json
+{
+  "args": ["--model", "{env:PLAN_MODEL}"],
+  "env": {
+    "OPENCODE_CONFIG_CONTENT": "{\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"}}}}"
+  }
+}
+```
 
 Keep `envIsolation: true` (the default). Use `passEnv` to forward only the exact env key each
 agent needs:
@@ -672,8 +734,8 @@ Sub-agents receive MCP servers from two sources merged without duplicates:
 
 Configured MCP servers are normalized before forwarding. `stdio` entries are sent with
 `type`, `name`, `command`, `args: []`, and `env: []`; `http` entries are sent with `type`,
-`name`, `url`, and `headers: []`. Header and stdio env values support `${ENV_VAR}` expansion at
-startup; empty `Bearer ${MISSING_TOKEN}` headers are dropped.
+`name`, `url`, and `headers: []`. Header and stdio env values support `{env:ENV_VAR}` and
+`${ENV_VAR}` expansion at startup; empty `Bearer ${MISSING_TOKEN}` headers are dropped.
 
 The merged list is filtered per child after `initialize`: `stdio` servers are forwarded, while
 `http`/`sse` servers are only forwarded to agents that advertise those MCP capabilities. Dropped
@@ -696,8 +758,8 @@ don't interfere, and it reduces initial token usage by ~90% via lazy tool loadin
 }
 ```
 
-`${LAZY_MCP_TOKEN}` is expanded from `process.env` at startup. Stdio MCP servers can pass env in
-ACP name/value-array form:
+`${LAZY_MCP_TOKEN}` is expanded from `process.env` or the config-adjacent `.env` at startup.
+Stdio MCP servers can pass env in ACP name/value-array form:
 
 ```json
 {
@@ -713,8 +775,29 @@ ACP name/value-array form:
 
 ## Agent CLI reference
 
+ACP sub-agent command examples with model selection. Some ACP bridges expose model choice as a
+startup flag; others use environment/config settings or ACP `session/set_model` instead.
+When using `npx --package`, keep the binary name as an explicit argument after the package name
+so ACP flags are passed to that executable.
+
+| Agent | Command |
+|---|---|
+| GitHub Copilot | `COPILOT_MODEL=auto npx --yes --package @github/copilot-language-server@latest copilot-language-server --acp` |
+| Claude Code | `ANTHROPIC_MODEL=claude-sonnet-4-6 npx @zed-industries/claude-code-acp@latest` |
+| Gemini CLI | `npx @google/gemini-cli@latest --model auto --experimental-acp` |
+| Qwen Code | `npx @qwen-code/qwen-code@latest --model qwen3.6-plus --acp` |
+| Auggie CLI | `npx @augmentcode/auggie@latest --model <model-id> --acp` |
+| Qoder CLI | `npx @qoder-ai/qodercli@latest --model auto --acp` |
+| Kilo Code | `npx --yes --package @kilocode/cli@latest kilo --model kilo/minimax/minimax-m2.7 acp` |
+| Codex CLI | `npx @zed-industries/codex-acp@latest -c model="o3"` |
+| OpenCode | `npx opencode-ai@latest --model <provider/model> acp` |
+| OpenClaw | `openclaw acp` (model selection is not exposed as an ACP startup option) |
+| Kiro CLI | `kiro-cli settings chat.defaultModel claude-opus-4.7 && kiro-cli acp` |
+| Hermes Agent | `hermes model && hermes acp` |
+
 | Agent | `command` / `args` / `env` | Source |
 |---|---|---|
+| GitHub Copilot | `npx --yes --package @github/copilot-language-server@latest copilot-language-server --acp`; `COPILOT_MODEL` | [Copilot Language Server](https://www.npmjs.com/package/@github/copilot-language-server) |
 | Claude Agent ACP (Opus/Sonnet 4.6) | `npx --yes --package @agentclientprotocol/claude-agent-acp@0.32.0 claude-agent-acp`; `ANTHROPIC_MODEL` and `CLAUDE_CODE_EFFORT_LEVEL` | [claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp) |
 | Gemini CLI (3.1 Pro Preview) | `npx --yes --package @google/gemini-cli@0.41.1 gemini --acp --model gemini-3.1-pro-preview` | [Gemini CLI ACP](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md) |
 | Codex ACP (GPT-5.5) | `npx --yes --package @zed-industries/codex-acp@0.5.0 codex-acp`; model from `~/.codex/config.toml` | [Zed external agents](https://zed.dev/docs/ai/external-agents) |

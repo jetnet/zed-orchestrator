@@ -8,7 +8,10 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "$schema": { "type": "string" },
+    "$schema": {
+      "type": "string",
+      "description": "Optional JSON Schema path for editor validation."
+    },
 
     "maxTurns": {
       "type": "integer", "minimum": 1, "default": 5,
@@ -64,7 +67,10 @@
     },
     "workflow": {
       "type": "array", "minItems": 1,
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string", "minLength": 1,
+        "description": "Name of an agent group to run after the previous group is approved."
+      },
       "description": "Ordered group progression after approval."
     },
     "artifactDir": {
@@ -79,8 +85,14 @@
         "type": "object",
         "required": ["requestsPerMinute"],
         "properties": {
-          "requestsPerMinute": { "type": "number", "exclusiveMinimum": 0 },
-          "burstSize":         { "type": "integer", "minimum": 1 }
+          "requestsPerMinute": {
+            "type": "number", "exclusiveMinimum": 0,
+            "description": "Average token-bucket refill rate for this key, measured in requests per minute."
+          },
+          "burstSize": {
+            "type": "integer", "minimum": 1,
+            "description": "Maximum burst capacity for this key. Defaults to requestsPerMinute when omitted."
+          }
         }
       }
     },
@@ -102,33 +114,38 @@
           }
         ],
         "properties": {
-          "type":    { "type": "string", "enum": ["http", "stdio"] },
-          "name":    { "type": "string", "minLength": 1 },
-          "url":     { "type": "string", "minLength": 1 },
-          "command": { "type": "string", "minLength": 1 },
-          "args":    { "type": "array", "items": { "type": "string" } },
+          "type":    { "type": "string", "enum": ["http", "stdio"], "description": "MCP transport type: http for URL servers, stdio for child-process servers." },
+          "name":    { "type": "string", "minLength": 1, "description": "MCP server name forwarded to child agents." },
+          "url":     { "type": "string", "minLength": 1, "description": "HTTP MCP endpoint URL. Required when type is http." },
+          "command": { "type": "string", "minLength": 1, "description": "Executable for a stdio MCP server. Required when type is stdio." },
+          "args":    {
+            "type": "array",
+            "items": { "type": "string", "description": "One command-line argument for the stdio MCP server." },
+            "description": "Arguments passed to a stdio MCP server command."
+          },
           "env": {
             "type": "array",
-            "description": "Stdio MCP environment entries. Values support ${ENV_VAR} expansion.",
+            "description": "Stdio MCP environment entries. Values support {env:ENV_VAR} and ${ENV_VAR} expansion.",
             "items": {
               "type": "object",
               "required": ["name", "value"],
               "additionalProperties": false,
               "properties": {
-                "name":  { "type": "string", "minLength": 1 },
-                "value": { "type": "string", "description": "Supports ${ENV_VAR} expansion." }
+                "name":  { "type": "string", "minLength": 1, "description": "Environment variable name passed to the stdio MCP server." },
+                "value": { "type": "string", "description": "Supports {env:ENV_VAR} and ${ENV_VAR} expansion." }
               }
             }
           },
           "headers": {
             "type": "array",
+            "description": "HTTP headers forwarded to this MCP server. Values support {env:ENV_VAR} and ${ENV_VAR} expansion.",
             "items": {
               "type": "object",
               "required": ["name", "value"],
               "additionalProperties": false,
               "properties": {
-                "name":  { "type": "string", "minLength": 1 },
-                "value": { "type": "string", "description": "Supports ${ENV_VAR} expansion." }
+                "name":  { "type": "string", "minLength": 1, "description": "HTTP header name sent to the MCP server." },
+                "value": { "type": "string", "description": "Supports {env:ENV_VAR} and ${ENV_VAR} expansion." }
               }
             }
           }
@@ -139,7 +156,10 @@
     "subAgents": {
       "type": "array", "minItems": 1,
       "description": "Legacy default group sub-agents.",
-      "items": { "$ref": "#/definitions/agentSpec" }
+      "items": {
+        "$ref": "#/definitions/agentSpec",
+        "description": "Agent spec for the legacy default group."
+      }
     },
     "reviewer": {
       "$ref": "#/definitions/agentSpec",
@@ -148,7 +168,10 @@
     "agentGroups": {
       "type": "object", "minProperties": 1,
       "description": "Named sub-agent groups.",
-      "additionalProperties": { "$ref": "#/definitions/agentGroup" }
+      "additionalProperties": {
+        "$ref": "#/definitions/agentGroup",
+        "description": "Agent group keyed by the group name used in defaultGroup, workflow, and @orchestrator group directives."
+      }
     }
   },
 
@@ -189,7 +212,10 @@
         }
       ],
       "properties": {
-        "description": { "type": "string" },
+        "description": {
+          "type": "string",
+          "description": "Human-readable group purpose for operators reading the config."
+        },
         "persist": {
           "type": "boolean",
           "description": "When false, the session resets to defaultGroup after this prompt. Defaults false for single_writer groups."
@@ -197,39 +223,57 @@
         "strategy": {
           "type": "string",
           "enum": ["parallel_reports", "single_writer"],
-          "default": "parallel_reports"
+          "default": "parallel_reports",
+          "description": "parallel_reports runs read-only agents and synthesizes reports; single_writer allows one named writer."
         },
-        "permissions":       { "$ref": "#/definitions/permissions" },
-        "reviewerPermissions": { "$ref": "#/definitions/permissions" },
-        "writerPermissions":   { "$ref": "#/definitions/permissions" },
-        "writer": { "type": "string", "minLength": 1 },
+        "permissions":       { "$ref": "#/definitions/permissions", "description": "Default ACP proxy policy for sub-agents in this group." },
+        "reviewerPermissions": { "$ref": "#/definitions/permissions", "description": "ACP proxy policy for the reviewer. Must remain read-only." },
+        "writerPermissions":   { "$ref": "#/definitions/permissions", "description": "ACP proxy policy for the named writer in single_writer groups." },
+        "writer": {
+          "type": "string", "minLength": 1,
+          "description": "Name of the single sub-agent allowed to mutate code in a single_writer group."
+        },
         "attachApprovedPlanFrom": {
           "type": "string", "minLength": 1,
           "description": "Group name whose approved-plan.md should be auto-attached before this group runs."
         },
-        "artifactDir": { "$ref": "#/definitions/workspaceRelativePath" },
-        "maxTurns": { "type": "integer", "minimum": 1 },
+        "artifactDir": {
+          "$ref": "#/definitions/workspaceRelativePath",
+          "description": "Workspace-relative artifact directory override for this group."
+        },
+        "maxTurns": {
+          "type": "integer", "minimum": 1,
+          "description": "Review-round limit override for this group."
+        },
         "concurrency": { "type": "integer", "minimum": 1,
           "description": "Override global concurrency for this group." },
         "subAgents": {
           "type": "array", "minItems": 1,
+          "description": "Agents run for this group before the reviewer synthesizes results.",
           "items": { "$ref": "#/definitions/agentSpec" }
         },
-        "reviewer": { "$ref": "#/definitions/agentSpec" }
+        "reviewer": {
+          "$ref": "#/definitions/agentSpec",
+          "description": "Agent that reviews and synthesizes sub-agent outputs for this group."
+        }
       }
     },
 
     "permissions": {
       "oneOf": [
-        { "type": "string", "enum": ["read_only", "writer_only", "full", "allow_all"] },
+        {
+          "type": "string",
+          "enum": ["read_only", "writer_only", "full", "allow_all"],
+          "description": "Named ACP proxy policy shortcut."
+        },
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "readFiles":  { "type": "boolean" },
-            "writeFiles": { "type": "boolean" },
-            "terminal":   { "type": "boolean" },
-            "mcp":        { "type": "boolean" },
+            "readFiles":  { "type": "boolean", "description": "Allow proxied ACP file-read requests." },
+            "writeFiles": { "type": "boolean", "description": "Allow proxied ACP file-write requests." },
+            "terminal":   { "type": "boolean", "description": "Allow proxied ACP terminal requests." },
+            "mcp":        { "type": "boolean", "description": "Forward MCP servers to agents when child capabilities allow them." },
             "allowUnknownClientRequests": { "type": "boolean",
               "description": "Writer-only escape hatch: when true, unknown (non-fs/terminal/permission) child client methods are forwarded to Zed." }
           }
@@ -239,16 +283,20 @@
 
     "readOnlyPermissions": {
       "oneOf": [
-        { "type": "string", "enum": ["read_only"] },
+        {
+          "type": "string",
+          "enum": ["read_only"],
+          "description": "Read-only ACP proxy policy shortcut."
+        },
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "readFiles":  { "type": "boolean" },
-            "writeFiles": { "const": false },
-            "terminal":   { "const": false },
-            "mcp":        { "type": "boolean" },
-            "allowUnknownClientRequests": { "const": false }
+            "readFiles":  { "type": "boolean", "description": "Allow proxied ACP file-read requests." },
+            "writeFiles": { "const": false, "description": "Must stay false for read-only groups and reviewers." },
+            "terminal":   { "const": false, "description": "Must stay false for read-only groups and reviewers." },
+            "mcp":        { "type": "boolean", "description": "Forward MCP servers only when every forwarded server is known read-only." },
+            "allowUnknownClientRequests": { "const": false, "description": "Must stay false for read-only groups and reviewers." }
           }
         }
       ]
@@ -257,7 +305,8 @@
     "workspaceRelativePath": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?!.*[\\\\/]{2}).+"
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?!.*[\\\\/]{2}).+",
+      "description": "Workspace-relative path without absolute roots, empty segments, or .. traversal."
     },
 
     "agentSpec": {
@@ -265,24 +314,24 @@
       "required": ["name", "command"],
       "additionalProperties": false,
       "properties": {
-        "name":           { "type": "string", "minLength": 1 },
-        "command":        { "type": "string", "minLength": 1 },
+        "name":           { "type": "string", "minLength": 1, "description": "Display name used in Zed output and writer matching." },
+        "command":        { "type": "string", "minLength": 1, "description": "Executable used to start this ACP agent. Values support {env:ENV_VAR} and ${ENV_VAR} expansion." },
         "sandboxCommand": { "type": "string", "minLength": 1,
           "description": "Optional wrapper executable used to sandbox this child process. The real command and args are appended after sandboxArgs." },
-        "sandboxArgs":    { "type": "array", "items": { "type": "string" } },
-        "rateLimitKey":   { "type": "string", "minLength": 1 },
-        "args":           { "type": "array", "items": { "type": "string" } },
-        "env":            { "type": "object", "additionalProperties": { "type": "string" } },
-        "passEnv":        { "type": "array", "items": { "type": "string" } },
-        "envIsolation":   { "type": "boolean" },
+        "sandboxArgs":    { "type": "array", "items": { "type": "string" }, "description": "Arguments passed to sandboxCommand before the real agent command and args." },
+        "rateLimitKey":   { "type": "string", "minLength": 1, "description": "Name of the rateLimits bucket used by this agent. Defaults to command when omitted." },
+        "args":           { "type": "array", "items": { "type": "string" }, "description": "Values support {env:ENV_VAR} and ${ENV_VAR} expansion." },
+        "env":            { "type": "object", "additionalProperties": { "type": "string" }, "description": "Values support {env:ENV_VAR} and ${ENV_VAR} expansion." },
+        "passEnv":        { "type": "array", "items": { "type": "string" }, "description": "Environment variable names forwarded from the orchestrator process when envIsolation is true." },
+        "envIsolation":   { "type": "boolean", "description": "Per-agent override for environment isolation." },
         "credHome":       { "type": "string", "minLength": 1,
           "description": "Workspace-relative, absolute, or ~/... dir used as HOME for this agent. Isolates credential files." },
         "allowRealHome":  { "type": "boolean",
           "description": "When envIsolation is true and credHome is unset, explicitly allow forwarding the real HOME/XDG directories." },
-        "agentTimeoutMs": { "type": "integer", "minimum": 1000 },
-        "maxRetries":     { "type": "integer", "minimum": 0 },
-        "retryDelayMs":   { "type": "integer", "minimum": 0 },
-        "heartbeatMs":    { "type": "integer", "minimum": 0 }
+        "agentTimeoutMs": { "type": "integer", "minimum": 1000, "description": "Per-agent wall-clock timeout override in milliseconds." },
+        "maxRetries":     { "type": "integer", "minimum": 0, "description": "Per-agent retry-attempt override for transient failures." },
+        "retryDelayMs":   { "type": "integer", "minimum": 0, "description": "Per-agent base retry backoff override in milliseconds." },
+        "heartbeatMs":    { "type": "integer", "minimum": 0, "description": "Per-agent still-working ping interval override in milliseconds. 0 disables pings." }
       }
     }
   }
