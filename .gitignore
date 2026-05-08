@@ -2,6 +2,7 @@
 node_modules/
 
 # Local config overrides — keep secrets out of version control
+zed-settings.json
 agents.config.local.json
 *.local.json
 .claude/
