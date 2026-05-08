@@ -1751,13 +1751,16 @@ async function test_config_env_placeholders_and_dotenv() {
 
   const oldValue = process.env.ORCH_TEST_DOTENV_VALUE;
   const oldArg = process.env.ORCH_TEST_DOTENV_ARG;
+  const oldBare = process.env.ORCH_TEST_DOTENV_BARE;
   delete process.env.ORCH_TEST_DOTENV_VALUE;
   delete process.env.ORCH_TEST_DOTENV_ARG;
+  delete process.env.ORCH_TEST_DOTENV_BARE;
 
   try {
     fs.writeFileSync(path.join(tmpDir, '.env'), [
       'ORCH_TEST_DOTENV_VALUE=from-dotenv-value',
       'ORCH_TEST_DOTENV_ARG=from-dotenv-arg',
+      'ORCH_TEST_DOTENV_BARE=from-dotenv-bare',
       '',
     ].join('\n'));
 
@@ -1771,7 +1774,10 @@ rl.on('line',line=>{
   if(msg.method==='initialize') send({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,agentInfo:{name:'p',version:'1'},agentCapabilities:{}}});
   else if(msg.method==='session/new') send({jsonrpc:'2.0',id:msg.id,result:{sessionId:'s'}});
   else if(msg.method==='session/prompt') {
-    const text='ENV=' + process.env.ORCH_PLACEHOLDER_VALUE + ' ARG=' + process.argv[2];
+    const text='ENV=' + process.env.ORCH_PLACEHOLDER_VALUE +
+      ' ARG=' + process.argv[2] +
+      ' BARE=' + process.env.ORCH_BARE_VALUE +
+      ' JSON=' + process.env.ORCH_JSON_VALUE;
     send({jsonrpc:'2.0',id:msg.id,result:{stopReason:'end_turn',content:[{type:'text',text}]}});
   }
 });
@@ -1788,7 +1794,8 @@ rl.on('line',line=>{
   else if(msg.method==='session/new') send({jsonrpc:'2.0',id:msg.id,result:{sessionId:'r'}});
   else if(msg.method==='session/prompt') {
     const text=msg.params.prompt[0].text;
-    const ok=text.includes('ENV=from-dotenv-value ARG=from-dotenv-arg');
+    const ok=text.includes('ENV=from-dotenv-value ARG=from-dotenv-arg BARE=from-dotenv-bare') &&
+      text.includes('JSON={"$schema":"kept","value":"from-dotenv-value"}');
     send({jsonrpc:'2.0',id:msg.id,result:{stopReason:'end_turn',content:[{type:'text',text:ok ? 'APPROVED: dotenv-env-ok' : 'APPROVED: dotenv-env-bad'}]}});
   }
 });
@@ -1803,7 +1810,11 @@ rl.on('line',line=>{
         name: 'DotEnvProbe',
         command: 'node',
         args: [probe, '{env:ORCH_TEST_DOTENV_ARG}'],
-        env: { ORCH_PLACEHOLDER_VALUE: '{env:ORCH_TEST_DOTENV_VALUE}' },
+        env: {
+          ORCH_PLACEHOLDER_VALUE: '{env:ORCH_TEST_DOTENV_VALUE}',
+          ORCH_BARE_VALUE: '$ORCH_TEST_DOTENV_BARE',
+          ORCH_JSON_VALUE: '{"$schema":"kept","value":"${ORCH_TEST_DOTENV_VALUE}"}',
+        },
       }],
       reviewer: { name: 'Reviewer', command: 'node', args: [reviewerPath], env: {} },
     }));
@@ -1816,6 +1827,8 @@ rl.on('line',line=>{
     else process.env.ORCH_TEST_DOTENV_VALUE = oldValue;
     if (oldArg === undefined) delete process.env.ORCH_TEST_DOTENV_ARG;
     else process.env.ORCH_TEST_DOTENV_ARG = oldArg;
+    if (oldBare === undefined) delete process.env.ORCH_TEST_DOTENV_BARE;
+    else process.env.ORCH_TEST_DOTENV_BARE = oldBare;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }

@@ -56,7 +56,11 @@ function loadDotEnvForConfig(configPath, env = process.env) {
 
 function expandConfigString(str) {
   if (typeof str !== 'string') return str;
-  // Replace {env:VAR} then ${VAR}
+  const wholeBareEnv = str.match(/^\$([A-Z_][A-Z0-9_]*)$/);
+  if (wholeBareEnv) return process.env[wholeBareEnv[1]] || '';
+
+  // Replace {env:VAR} then ${VAR}. Bare $VAR is only expanded when it is the
+  // entire string, so JSON payloads containing keys such as "$schema" survive.
   const step1 = str.replace(/\{env:([A-Za-z0-9_]+)\}/g, function(_, v) { return process.env[v] || ''; });
   return step1.replace(/\$\{([^}]+)\}/g, function(_, v) { return process.env[v] || ''; });
 }

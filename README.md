@@ -358,11 +358,11 @@ command.
 | Field | Type | Description |
 |---|---|---|
 | `name` | string | Display name |
-| `command` | string | Executable. String values support `{env:VAR}` / `${VAR}` expansion |
-| `args` | string[] | CLI arguments. String values support `{env:VAR}` / `${VAR}` expansion |
+| `command` | string | Executable. String values support `{env:VAR}` / `${VAR}` expansion, plus whole-string `$VAR` |
+| `args` | string[] | CLI arguments. String values support `{env:VAR}` / `${VAR}` expansion, plus whole-string `$VAR` |
 | `sandboxCommand` | string | Optional wrapper executable. The real `command` and `args` are appended after `sandboxArgs`. |
 | `sandboxArgs` | string[] | Arguments passed to `sandboxCommand` before the real agent command. |
-| `env` | object | Extra env vars set for this agent. Values support `{env:VAR}` / `${VAR}` expansion |
+| `env` | object | Extra env vars set for this agent. Values support `{env:VAR}` / `${VAR}` expansion, plus whole-string `$VAR` |
 | `passEnv` | string[] | Env keys forwarded from orchestrator env when `envIsolation: true` |
 | `credHome` | string | Workspace-relative, absolute, or `~/...` path used as `HOME` for this agent. Gives each agent its own credential directory, preventing one provider's auth files from being read by another agent. |
 | `allowRealHome` | bool | Explicitly forward the real `HOME`/XDG dirs when `envIsolation: true` and `credHome` is unset |
@@ -477,10 +477,12 @@ entries over `allowRealHome`.
 
 ### Env isolation
 
-String values in `agents.config.json` support `{env:VAR}` and `${VAR}` placeholders. Before the
-config is expanded, the orchestrator loads a `.env` file from the same directory as the active
-config file (`ORCHESTRATOR_CONFIG`, or the default `agents.config.json`). Existing shell
-environment variables take precedence over `.env` values.
+String values in `agents.config.json` support `{env:VAR}` and `${VAR}` placeholders. Values that
+are exactly `$VAR` are also expanded; bare `$VAR` is intentionally not expanded inside larger
+strings so embedded JSON keys such as `"$schema"` are preserved. Before the config is expanded,
+the orchestrator loads a `.env` file from the same directory as the active config file
+(`ORCHESTRATOR_CONFIG`, or the default `agents.config.json`). Existing shell environment variables
+take precedence over `.env` values.
 
 ```dotenv
 PLAN_MODEL=gemini-3.1-pro-preview
