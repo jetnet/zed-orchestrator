@@ -19,6 +19,7 @@
     "policy.js",
     "artifact-store.js",
     "config.js",
+    "config-expand.js",
     "rate-limiter.js",
     "concurrency.js",
     "redact.js",

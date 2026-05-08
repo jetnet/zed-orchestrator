@@ -3,13 +3,16 @@
 const path = require('path');
 const fs   = require('fs');
 const { normalizePolicy } = require('./policy');
+const { expandConfigPlaceholders, loadDotEnvForConfig } = require('./config-expand');
 
 const cfgPath = process.env.ORCHESTRATOR_CONFIG
   || path.join(__dirname, 'agents.config.json');
 
 let cfg;
 try {
+  loadDotEnvForConfig(cfgPath);
   cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  expandConfigPlaceholders(cfg);
 } catch (e) {
   process.stderr.write(`[orchestrator] Cannot read config: ${cfgPath}\n${e.message}\n`);
   process.exit(1);
@@ -48,7 +51,9 @@ function tryAjvValidation(data) {
 // ─── Env expansion for MCP server config ─────────────────────────────────────
 
 function expandEnv(str) {
-  return str.replace(/\$\{([^}]+)\}/g, (_, v) => process.env[v] || '');
+  return str
+    .replace(/\{env:([A-Za-z0-9_]+)\}/g, (_, v) => process.env[v] || '')
+    .replace(/\$\{([^}]+)\}/g, (_, v) => process.env[v] || '');
 }
 
 function resolveNameValueEntries(entries = [], { filterEmptyBearer = false } = {}) {

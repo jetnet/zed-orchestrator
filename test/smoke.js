@@ -1745,6 +1745,81 @@ rl.on('line',line=>{
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
+async function test_config_env_placeholders_and_dotenv() {
+  console.log('\n[Test 13b] config {env:VAR} placeholders load from sibling .env');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-test-'));
+
+  const oldValue = process.env.ORCH_TEST_DOTENV_VALUE;
+  const oldArg = process.env.ORCH_TEST_DOTENV_ARG;
+  delete process.env.ORCH_TEST_DOTENV_VALUE;
+  delete process.env.ORCH_TEST_DOTENV_ARG;
+
+  try {
+    fs.writeFileSync(path.join(tmpDir, '.env'), [
+      'ORCH_TEST_DOTENV_VALUE=from-dotenv-value',
+      'ORCH_TEST_DOTENV_ARG=from-dotenv-arg',
+      '',
+    ].join('\n'));
+
+    const probe = path.join(tmpDir, 'probe.js');
+    fs.writeFileSync(probe, `
+const {createInterface}=require('readline');
+const rl=createInterface({input:process.stdin});
+const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+rl.on('line',line=>{
+  let msg;try{msg=JSON.parse(line);}catch{return;}
+  if(msg.method==='initialize') send({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,agentInfo:{name:'p',version:'1'},agentCapabilities:{}}});
+  else if(msg.method==='session/new') send({jsonrpc:'2.0',id:msg.id,result:{sessionId:'s'}});
+  else if(msg.method==='session/prompt') {
+    const text='ENV=' + process.env.ORCH_PLACEHOLDER_VALUE + ' ARG=' + process.argv[2];
+    send({jsonrpc:'2.0',id:msg.id,result:{stopReason:'end_turn',content:[{type:'text',text}]}});
+  }
+});
+`);
+
+    const reviewerPath = path.join(tmpDir, 'reviewer.js');
+    fs.writeFileSync(reviewerPath, `
+const {createInterface}=require('readline');
+const rl=createInterface({input:process.stdin});
+const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+rl.on('line',line=>{
+  let msg;try{msg=JSON.parse(line);}catch{return;}
+  if(msg.method==='initialize') send({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,agentInfo:{name:'r',version:'1'},agentCapabilities:{}}});
+  else if(msg.method==='session/new') send({jsonrpc:'2.0',id:msg.id,result:{sessionId:'r'}});
+  else if(msg.method==='session/prompt') {
+    const text=msg.params.prompt[0].text;
+    const ok=text.includes('ENV=from-dotenv-value ARG=from-dotenv-arg');
+    send({jsonrpc:'2.0',id:msg.id,result:{stopReason:'end_turn',content:[{type:'text',text:ok ? 'APPROVED: dotenv-env-ok' : 'APPROVED: dotenv-env-bad'}]}});
+  }
+});
+`);
+
+    const cfgPath = path.join(tmpDir, 'agents.config.json');
+    fs.writeFileSync(cfgPath, JSON.stringify({
+      maxTurns: 1,
+      maxRetries: 0,
+      agentTimeoutMs: 5000,
+      subAgents: [{
+        name: 'DotEnvProbe',
+        command: 'node',
+        args: [probe, '{env:ORCH_TEST_DOTENV_ARG}'],
+        env: { ORCH_PLACEHOLDER_VALUE: '{env:ORCH_TEST_DOTENV_VALUE}' },
+      }],
+      reviewer: { name: 'Reviewer', command: 'node', args: [reviewerPath], env: {} },
+    }));
+
+    const { result } = await runOrchestrator(cfgPath, tmpDir);
+    const text = result?.content?.[0]?.text || '';
+    assert('{env:VAR} placeholders are expanded from sibling .env', text.includes('dotenv-env-ok'), text);
+  } finally {
+    if (oldValue === undefined) delete process.env.ORCH_TEST_DOTENV_VALUE;
+    else process.env.ORCH_TEST_DOTENV_VALUE = oldValue;
+    if (oldArg === undefined) delete process.env.ORCH_TEST_DOTENV_ARG;
+    else process.env.ORCH_TEST_DOTENV_ARG = oldArg;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 async function test_huge_line_aborts() {
   console.log('\n[Test 14] Sub-agent emitting an oversized line is aborted, no OOM');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-test-'));
@@ -5208,6 +5283,7 @@ async function test_integration_real_claude_acp() {
     await T(test_heartbeat_disabled);
     await T(test_approved_parsing_tolerant);
     await T(test_env_isolation);
+    await T(test_config_env_placeholders_and_dotenv);
     await T(test_huge_line_aborts);
     await T(test_approved_injection_neutralized);
     await T(test_child_session_update_discriminator);
