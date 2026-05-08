@@ -1,0 +1,37 @@
+{
+  "name": "zed-orchestrator",
+  "version": "1.1.0",
+  "description": "ACP orchestrator server for Zed IDE — grouped multi-agent workflows with health probes, concurrency control, and per-agent credential isolation",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test/smoke.js",
+    "test:integration": "RUN_INTEGRATION_TESTS=1 node test/smoke.js",
+    "review:gate": "node scripts/review-gate.js",
+    "pack:check": "npm pack --dry-run",
+    "install-acp-tools": "node scripts/install-acp-tools.js"
+  },
+  "engines": { "node": ">=18" },
+  "files": [
+    "index.js",
+    "orchestrator.js",
+    "acp-client.js",
+    "policy.js",
+    "artifact-store.js",
+    "config.js",
+    "rate-limiter.js",
+    "concurrency.js",
+    "redact.js",
+    "agents.config.schema.json",
+    "agents.config.json",
+    "README.md",
+    "package.json",
+    "scripts/install-acp-tools.js",
+    "scripts/review-gate.js",
+    "zed-settings.example.json"
+  ],
+  "devDependencies": {
+    "ajv": "^8.17.1"
+  },
+  "license": "MIT"
+}

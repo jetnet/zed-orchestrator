@@ -1,0 +1,234 @@
+{
+    "$schema": "./agents.config.schema.json",
+    "maxTurns": 5,
+    "agentTimeoutMs": 120000,
+    "maxRetries": 3,
+    "retryDelayMs": 5000,
+    "probeTimeoutMs": 20000,
+    "concurrency": 4,
+    "defaultGroup": "plan",
+    "workflow": ["plan"],
+    "rateLimits": {
+        "claude-sonnet-4-6": { "requestsPerMinute": 60, "burstSize": 10 },
+        "claude-opus-4-6": { "requestsPerMinute": 30, "burstSize": 5 },
+        "gemini-3.1-pro": { "requestsPerMinute": 60, "burstSize": 10 },
+        "codex-gpt-5.5": { "requestsPerMinute": 60, "burstSize": 10 },
+        "kilo-minimax-m2.7": { "requestsPerMinute": 60, "burstSize": 10 },
+        "kilo-mimo-v2.5-pro": { "requestsPerMinute": 60, "burstSize": 10 },
+        "opencode-qwen3.6-plus": { "requestsPerMinute": 60, "burstSize": 10 }
+    },
+    "agentGroups": {
+        "plan": {
+            "description": "Planning agents: top-tier reasoning models from Anthropic, Google, and OpenAI. MCP is off by default; opt in per group only when every forwarded MCP server is known read-only.",
+            "strategy": "parallel_reports",
+            "persist": true,
+            "permissions": { "readFiles": true, "writeFiles": false, "terminal": false, "mcp": false },
+            "reviewerPermissions": { "readFiles": true, "writeFiles": false, "terminal": false, "mcp": false },
+            "artifactDir": ".plan/orchestrator",
+            "maxTurns": 5,
+            "subAgents": [
+                {
+                    "name": "Claude Code (Opus 4.6, max effort)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@agentclientprotocol/claude-agent-acp@0.32.0",
+                        "claude-agent-acp"
+                    ],
+                    "rateLimitKey": "claude-opus-4-6",
+                    "credHome": "~/.local/share/zed-orchestrator/claude-opus",
+                    "env": {
+                        "ANTHROPIC_MODEL": "claude-opus-4-6",
+                        "CLAUDE_CODE_EFFORT_LEVEL": "max"
+                    },
+                    "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+                },
+                {
+                    "name": "Gemini CLI (3.1 Pro Preview)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@google/gemini-cli@0.41.1",
+                        "gemini",
+                        "--acp",
+                        "--model",
+                        "gemini-3.1-pro-preview"
+                    ],
+                    "rateLimitKey": "gemini-3.1-pro",
+                    "credHome": "~/.local/share/zed-orchestrator/gemini",
+                    "env": {},
+                    "passEnv": [
+                        "GEMINI_API_KEY",
+                        "GOOGLE_API_KEY",
+                        "GOOGLE_CLOUD_PROJECT",
+                        "GOOGLE_CLOUD_LOCATION",
+                        "GOOGLE_APPLICATION_CREDENTIALS",
+                        "GOOGLE_GENAI_USE_VERTEXAI"
+                    ]
+                },
+                {
+                    "name": "Codex (GPT-5.5, xhigh reasoning via ~/.codex/config.toml)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@zed-industries/codex-acp@0.5.0",
+                        "codex-acp"
+                    ],
+                    "rateLimitKey": "codex-gpt-5.5",
+                    "credHome": "~/.local/share/zed-orchestrator/codex",
+                    "env": {},
+                    "passEnv": ["OPENAI_API_KEY", "CODEX_API_KEY"]
+                }
+            ],
+            "reviewer": {
+                "name": "Claude Agent ACP (Sonnet 4.6)",
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package",
+                    "@agentclientprotocol/claude-agent-acp@0.32.0",
+                    "claude-agent-acp"
+                ],
+                "rateLimitKey": "claude-sonnet-4-6",
+                "credHome": "~/.local/share/zed-orchestrator/claude-sonnet",
+                "env": {
+                    "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+                    "CLAUDE_CODE_EFFORT_LEVEL": "high"
+                },
+                "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+            }
+        },
+        "code": {
+            "description": "Single implementation writer. Select explicitly with @orchestrator group: code after a plan is approved.",
+            "strategy": "single_writer",
+            "persist": false,
+            "writer": "Kilo Code (MiniMax M2.7)",
+            "attachApprovedPlanFrom": "plan",
+            "permissions": "writer_only",
+            "writerPermissions": {
+                "readFiles": true,
+                "writeFiles": true,
+                "terminal": true,
+                "mcp": true
+            },
+            "reviewerPermissions": "read_only",
+            "artifactDir": ".plan/orchestrator",
+            "maxTurns": 4,
+            "subAgents": [
+                {
+                    "name": "Kilo Code (MiniMax M2.7)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@kilocode/cli@1.0.0",
+                        "kilo",
+                        "--model",
+                        "kilo/minimax/minimax-m2.7",
+                        "acp"
+                    ],
+                    "rateLimitKey": "kilo-minimax-m2.7",
+                    "credHome": "~/.local/share/zed-orchestrator/kilo-minimax",
+                    "env": {}
+                }
+            ],
+            "reviewer": {
+                "name": "Claude Agent ACP (Sonnet 4.6)",
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package",
+                    "@agentclientprotocol/claude-agent-acp@0.32.0",
+                    "claude-agent-acp"
+                ],
+                "rateLimitKey": "claude-sonnet-4-6",
+                "credHome": "~/.local/share/zed-orchestrator/claude-sonnet",
+                "env": {
+                    "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+                    "CLAUDE_CODE_EFFORT_LEVEL": "high"
+                },
+                "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+            }
+        },
+        "review": {
+            "description": "Independent review agents using documented ACP CLIs. MCP is off by default; opt in per group only when every forwarded MCP server is known read-only.",
+            "strategy": "parallel_reports",
+            "persist": false,
+            "permissions": { "readFiles": true, "writeFiles": false, "terminal": false, "mcp": false },
+            "reviewerPermissions": { "readFiles": true, "writeFiles": false, "terminal": false, "mcp": false },
+            "artifactDir": ".plan/orchestrator",
+            "maxTurns": 3,
+            "subAgents": [
+                {
+                    "name": "Kilo Code (MiniMax M2.7)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@kilocode/cli@1.0.0",
+                        "kilo",
+                        "--model",
+                        "kilo/minimax/minimax-m2.7",
+                        "acp"
+                    ],
+                    "rateLimitKey": "kilo-minimax-m2.7",
+                    "credHome": "~/.local/share/zed-orchestrator/kilo-minimax",
+                    "env": {}
+                },
+                {
+                    "name": "Kilo Code (Xiaomi MiMo V2.5 Pro)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "@kilocode/cli@1.0.0",
+                        "kilo",
+                        "--model",
+                        "kilo/xiaomi/mimo-v2.5-pro",
+                        "acp"
+                    ],
+                    "rateLimitKey": "kilo-mimo-v2.5-pro",
+                    "credHome": "~/.local/share/zed-orchestrator/kilo-mimo",
+                    "env": {}
+                },
+                {
+                    "name": "OpenCode via OpenRouter (Qwen3.6 Plus)",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package",
+                        "opencode-ai@0.6.0",
+                        "opencode",
+                        "acp"
+                    ],
+                    "rateLimitKey": "opencode-qwen3.6-plus",
+                    "credHome": "~/.local/share/zed-orchestrator/opencode",
+                    "env": {
+                        "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"openrouter/qwen/qwen3.6-plus\",\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"qwen/qwen3.6-plus\":{}}}}}"
+                    },
+                    "passEnv": ["OPENROUTER_API_KEY"]
+                }
+            ],
+            "reviewer": {
+                "name": "Claude Agent ACP (Sonnet 4.6)",
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package",
+                    "@agentclientprotocol/claude-agent-acp@0.32.0",
+                    "claude-agent-acp"
+                ],
+                "rateLimitKey": "claude-sonnet-4-6",
+                "credHome": "~/.local/share/zed-orchestrator/claude-sonnet",
+                "env": {
+                    "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+                    "CLAUDE_CODE_EFFORT_LEVEL": "high"
+                },
+                "passEnv": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+            }
+        }
+    }
+}

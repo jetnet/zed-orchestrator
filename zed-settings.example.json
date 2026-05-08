@@ -1,0 +1,12 @@
+{
+  "agent_servers": {
+    "Orchestrator": {
+      "type": "custom",
+      "command": "node",
+      "args": ["/home/YOUR_USER/src/zed-orchestrator/index.js"],
+      "env": {
+        "ORCHESTRATOR_CONFIG": "/home/YOUR_USER/src/zed-orchestrator/agents.config.json"
+      }
+    }
+  }
+}

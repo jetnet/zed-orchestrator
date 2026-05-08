@@ -1,0 +1,289 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "zed-orchestrator agents config",
+  "type": "object",
+  "anyOf": [
+    { "required": ["agentGroups"] },
+    { "required": ["subAgents", "reviewer"] }
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+
+    "maxTurns": {
+      "type": "integer", "minimum": 1, "default": 5,
+      "description": "Maximum review rounds before the orchestrator gives up."
+    },
+    "agentTimeoutMs": {
+      "type": "integer", "minimum": 1000, "default": 120000,
+      "description": "Per-agent wall-clock timeout in milliseconds."
+    },
+    "maxRetries": {
+      "type": "integer", "minimum": 0, "default": 3,
+      "description": "Retry attempts for transient failures (429, 503, timeouts)."
+    },
+    "retryDelayMs": {
+      "type": "integer", "minimum": 0, "default": 5000,
+      "description": "Base exponential-backoff delay in milliseconds."
+    },
+    "heartbeatMs": {
+      "type": "integer", "minimum": 0, "default": 30000,
+      "description": "How often to emit a 'still working' ping. 0 = disabled."
+    },
+    "maxRetryAfterMs": {
+      "type": "integer", "minimum": 0, "default": 300000,
+      "description": "Cap on the Retry-After sleep derived from upstream error messages."
+    },
+    "maxLineBytes": {
+      "type": "integer", "minimum": 1024, "default": 4194304,
+      "description": "Max bytes for a single JSON-RPC line from a sub-agent (OOM guard)."
+    },
+    "maxOutputBytes": {
+      "type": "integer", "minimum": 1024, "default": 10485760,
+      "description": "Max total accumulated streamed or direct final text output per sub-agent (OOM guard)."
+    },
+    "reviewerAgentChars": {
+      "type": "integer", "minimum": 1000, "default": 40000,
+      "description": "Max characters of each sub-agent result included in the reviewer prompt."
+    },
+    "concurrency": {
+      "type": "integer", "minimum": 1, "default": 4,
+      "description": "Max sub-agents running simultaneously per group (fairness semaphore)."
+    },
+    "probeTimeoutMs": {
+      "type": "integer", "minimum": 0, "default": 20000,
+      "description": "Health-probe timeout per agent on round 1. Agents that fail are skipped. 0 disables probes."
+    },
+    "envIsolation": {
+      "type": "boolean", "default": true,
+      "description": "When true, sub-agents only inherit SAFE_ENV_KEYS plus explicit passEnv."
+    },
+    "defaultGroup": {
+      "type": "string", "minLength": 1,
+      "description": "Initial agent group for each new Zed session."
+    },
+    "workflow": {
+      "type": "array", "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Ordered group progression after approval."
+    },
+    "artifactDir": {
+      "$ref": "#/definitions/workspaceRelativePath",
+      "description": "Workspace-relative directory for plan/report artifacts."
+    },
+
+    "rateLimits": {
+      "type": "object",
+      "description": "Token-bucket rate limits keyed by command or rateLimitKey.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["requestsPerMinute"],
+        "properties": {
+          "requestsPerMinute": { "type": "number", "exclusiveMinimum": 0 },
+          "burstSize":         { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+
+    "mcpServers": {
+      "type": "array",
+      "description": "MCP tool servers shared across all sub-agents.",
+      "items": {
+        "type": "object",
+        "required": ["type", "name"],
+        "allOf": [
+          {
+            "if": { "properties": { "type": { "const": "http" } } },
+            "then": { "required": ["url"] }
+          },
+          {
+            "if": { "properties": { "type": { "const": "stdio" } } },
+            "then": { "required": ["command"] }
+          }
+        ],
+        "properties": {
+          "type":    { "type": "string", "enum": ["http", "stdio"] },
+          "name":    { "type": "string", "minLength": 1 },
+          "url":     { "type": "string", "minLength": 1 },
+          "command": { "type": "string", "minLength": 1 },
+          "args":    { "type": "array", "items": { "type": "string" } },
+          "env": {
+            "type": "array",
+            "description": "Stdio MCP environment entries. Values support ${ENV_VAR} expansion.",
+            "items": {
+              "type": "object",
+              "required": ["name", "value"],
+              "additionalProperties": false,
+              "properties": {
+                "name":  { "type": "string", "minLength": 1 },
+                "value": { "type": "string", "description": "Supports ${ENV_VAR} expansion." }
+              }
+            }
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "value"],
+              "additionalProperties": false,
+              "properties": {
+                "name":  { "type": "string", "minLength": 1 },
+                "value": { "type": "string", "description": "Supports ${ENV_VAR} expansion." }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "subAgents": {
+      "type": "array", "minItems": 1,
+      "description": "Legacy default group sub-agents.",
+      "items": { "$ref": "#/definitions/agentSpec" }
+    },
+    "reviewer": {
+      "$ref": "#/definitions/agentSpec",
+      "description": "Legacy default reviewer, or fallback for groups that omit their own."
+    },
+    "agentGroups": {
+      "type": "object", "minProperties": 1,
+      "description": "Named sub-agent groups.",
+      "additionalProperties": { "$ref": "#/definitions/agentGroup" }
+    }
+  },
+
+  "definitions": {
+    "agentGroup": {
+      "type": "object",
+      "required": ["subAgents"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              { "properties": { "strategy": { "const": "parallel_reports" } }, "required": ["strategy"] },
+              { "not": { "required": ["strategy"] } }
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["writer"] },
+                { "required": ["writerPermissions"] }
+              ]
+            },
+            "properties": {
+              "permissions": { "$ref": "#/definitions/readOnlyPermissions" },
+              "reviewerPermissions": { "$ref": "#/definitions/readOnlyPermissions" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "single_writer" } }, "required": ["strategy"] },
+          "then": {
+            "required": ["writer"],
+            "properties": {
+              "reviewerPermissions": { "$ref": "#/definitions/readOnlyPermissions" }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "description": { "type": "string" },
+        "persist": {
+          "type": "boolean",
+          "description": "When false, the session resets to defaultGroup after this prompt. Defaults false for single_writer groups."
+        },
+        "strategy": {
+          "type": "string",
+          "enum": ["parallel_reports", "single_writer"],
+          "default": "parallel_reports"
+        },
+        "permissions":       { "$ref": "#/definitions/permissions" },
+        "reviewerPermissions": { "$ref": "#/definitions/permissions" },
+        "writerPermissions":   { "$ref": "#/definitions/permissions" },
+        "writer": { "type": "string", "minLength": 1 },
+        "attachApprovedPlanFrom": {
+          "type": "string", "minLength": 1,
+          "description": "Group name whose approved-plan.md should be auto-attached before this group runs."
+        },
+        "artifactDir": { "$ref": "#/definitions/workspaceRelativePath" },
+        "maxTurns": { "type": "integer", "minimum": 1 },
+        "concurrency": { "type": "integer", "minimum": 1,
+          "description": "Override global concurrency for this group." },
+        "subAgents": {
+          "type": "array", "minItems": 1,
+          "items": { "$ref": "#/definitions/agentSpec" }
+        },
+        "reviewer": { "$ref": "#/definitions/agentSpec" }
+      }
+    },
+
+    "permissions": {
+      "oneOf": [
+        { "type": "string", "enum": ["read_only", "writer_only", "full", "allow_all"] },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "readFiles":  { "type": "boolean" },
+            "writeFiles": { "type": "boolean" },
+            "terminal":   { "type": "boolean" },
+            "mcp":        { "type": "boolean" },
+            "allowUnknownClientRequests": { "type": "boolean",
+              "description": "Writer-only escape hatch: when true, unknown (non-fs/terminal/permission) child client methods are forwarded to Zed." }
+          }
+        }
+      ]
+    },
+
+    "readOnlyPermissions": {
+      "oneOf": [
+        { "type": "string", "enum": ["read_only"] },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "readFiles":  { "type": "boolean" },
+            "writeFiles": { "const": false },
+            "terminal":   { "const": false },
+            "mcp":        { "type": "boolean" },
+            "allowUnknownClientRequests": { "const": false }
+          }
+        }
+      ]
+    },
+
+    "workspaceRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?!.*[\\\\/]{2}).+"
+    },
+
+    "agentSpec": {
+      "type": "object",
+      "required": ["name", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "name":           { "type": "string", "minLength": 1 },
+        "command":        { "type": "string", "minLength": 1 },
+        "sandboxCommand": { "type": "string", "minLength": 1,
+          "description": "Optional wrapper executable used to sandbox this child process. The real command and args are appended after sandboxArgs." },
+        "sandboxArgs":    { "type": "array", "items": { "type": "string" } },
+        "rateLimitKey":   { "type": "string", "minLength": 1 },
+        "args":           { "type": "array", "items": { "type": "string" } },
+        "env":            { "type": "object", "additionalProperties": { "type": "string" } },
+        "passEnv":        { "type": "array", "items": { "type": "string" } },
+        "envIsolation":   { "type": "boolean" },
+        "credHome":       { "type": "string", "minLength": 1,
+          "description": "Workspace-relative, absolute, or ~/... dir used as HOME for this agent. Isolates credential files." },
+        "allowRealHome":  { "type": "boolean",
+          "description": "When envIsolation is true and credHome is unset, explicitly allow forwarding the real HOME/XDG directories." },
+        "agentTimeoutMs": { "type": "integer", "minimum": 1000 },
+        "maxRetries":     { "type": "integer", "minimum": 0 },
+        "retryDelayMs":   { "type": "integer", "minimum": 0 },
+        "heartbeatMs":    { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

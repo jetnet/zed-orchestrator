@@ -1,0 +1,31 @@
+# Dependencies (none currently, but good practice)
+node_modules/
+
+# Local config overrides — keep secrets out of version control
+agents.config.local.json
+*.local.json
+.claude/
+.env
+.env.*
+
+# npm
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test artifacts (smoke.js writes to os.tmpdir(), not here, but just in case)
+/tmp/
+
+# Orchestrator planning artifacts
+.plan/
+
+# Per-agent credential homes (contain auth tokens and config files)
+.orch-cred/

@@ -1,0 +1,8 @@
+.claude/
+.orch-cred/
+.plan/
+.review/
+agents.config.local.json
+*.local.json
+.env
+.env.*

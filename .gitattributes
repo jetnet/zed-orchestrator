@@ -1,0 +1,5 @@
+.claude export-ignore
+.review export-ignore
+.plan export-ignore
+test export-ignore
+*.log export-ignore
