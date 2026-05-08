@@ -34,6 +34,26 @@ const notifyText = (sessionId, text) =>
     params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } },
   });
 
+const availableGroupCommands = () =>
+  Object.values(AGENT_GROUPS).map(group => ({
+    name: group.name,
+    description: group.description || `Use the "${group.name}" orchestrator group.`,
+    input: { hint: 'task or instructions' },
+  }));
+
+const notifyAvailableCommands = sessionId =>
+  send({
+    jsonrpc: '2.0',
+    method: 'session/update',
+    params: {
+      sessionId,
+      update: {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: availableGroupCommands(),
+      },
+    },
+  });
+
 // ─── Zed RPC (proxied child requests) ────────────────────────────────────────
 
 const pendingZedRequests = new Map();
@@ -118,6 +138,7 @@ rl.on('line', async line => {
     });
     log(`Session created: ${sessionId}, group=${DEFAULT_GROUP}`);
     reply(msg.id, { sessionId });
+    notifyAvailableCommands(sessionId);
 
   } else if (msg.method === 'session/prompt') {
     const { sessionId, prompt } = msg.params;

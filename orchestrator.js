@@ -144,7 +144,7 @@ function slashGroupLineRe(groupNames) {
     .map(name => String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('|');
   if (!escaped) return null;
-  return new RegExp(`^[ \\t]*/(${escaped})[ \\t]*$`, 'im');
+  return new RegExp(`^[ \\t]*/(${escaped})(?:[ \\t]+(.*))?[ \\t]*$`, 'im');
 }
 
 function requestedGroupName(task, groupNames = Object.keys(AGENT_GROUPS)) {
@@ -160,13 +160,16 @@ function stripGroupDirective(task, groupNames = Object.keys(AGENT_GROUPS)) {
   const blocks = Array.isArray(task) ? task : [{ type: 'text', text: String(task || '') }];
   const first = firstTextDirectiveLine(blocks);
   if (!first) return blocks;
-  const isDirective = first.line.match(GROUP_DIRECTIVE_RE) || (slashRe ? first.line.match(slashRe) : null);
-  if (!isDirective) return blocks;
+  const groupDirective = first.line.match(GROUP_DIRECTIVE_RE);
+  const slashDirective = slashRe ? first.line.match(slashRe) : null;
+  if (!groupDirective && !slashDirective) return blocks;
 
   return blocks.map((block, index) => {
     if (index !== first.blockIndex || typeof block.text !== 'string') return block;
     const lines = block.text.split(/\r?\n/);
-    lines.splice(first.lineIndex, 1);
+    const slashInput = slashDirective?.[2]?.trim();
+    if (slashInput) lines[first.lineIndex] = slashInput;
+    else lines.splice(first.lineIndex, 1);
     return { ...block, text: lines.join('\n').trim() };
   });
 }

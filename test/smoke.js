@@ -3140,8 +3140,19 @@ rl.on('line',line=>{
 
   const { result, notifs } = await runOrchestrator(cfgPath, tmpDir, {});
   const streamed = notifs.map(n => n.params?.update?.content?.text || '').join('');
+  const commandsUpdate = notifs.find(n =>
+    n.params?.update?.sessionUpdate === 'available_commands_update');
+  const commandNames = (commandsUpdate?.params?.update?.availableCommands || []).map(c => c.name);
 
+  assert('orchestrator advertises /plan to ACP clients', commandNames.includes('plan'), JSON.stringify(commandNames));
   assert('slash /plan shortcut result approved', streamed.includes('slash-shortcut-ok') || result.stopReason === 'end_turn');
+  {
+    const { requestedGroupName, stripGroupDirective } = require(path.join(__dirname, '..', 'orchestrator'));
+    const task = [{ type: 'text', text: '/plan Do analysis.' }];
+    const stripped = stripGroupDirective(task, ['plan']);
+    assert('/plan with same-line input selects plan group', requestedGroupName(task, ['plan']) === 'plan');
+    assert('/plan with same-line input preserves input text', stripped[0]?.text === 'Do analysis.', JSON.stringify(stripped));
+  }
 
   // Send /plan and confirm the group directive is stripped from the prompt text
   const proc2 = spawn('node', [path.join(__dirname, '..', 'index.js')], {
