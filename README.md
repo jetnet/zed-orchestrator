@@ -316,7 +316,9 @@ Full reference for `agents.config.json`:
 | `retryDelayMs` | int | 5000 | Base exponential-backoff delay |
 | `heartbeatMs` | int | 30000 | Ping interval while agent is working. 0 = off |
 | `maxRetryAfterMs` | int | 300000 | Max sleep accepted from upstream retry-after messages |
+| `retryablePatterns` | string[] | see below | Case-insensitive regex patterns matched against error messages to classify a failure as transient (worth retrying). Replaces the built-in list entirely when set. |
 | `envIsolation` | bool | true | Sub-agents see only `SAFE_ENV_KEYS` + `passEnv` |
+| `debug` | bool | false | Mirror every ACP frame and sub-agent stderr line to orchestrator stderr. Also via `ORCHESTRATOR_DEBUG=1`. |
 | `maxLineBytes` | int | 4194304 | Max bytes for a single RPC line (OOM guard) |
 | `maxOutputBytes` | int | 10485760 | Max total streamed or direct final text output per agent (OOM guard) |
 | `reviewerAgentChars` | int | 40000 | Max chars of each agent result in reviewer prompt |
@@ -326,6 +328,67 @@ Full reference for `agents.config.json`:
 | `subAgents` | array | — | Legacy default-group agent specs; use `agentGroups` for new configs |
 | `reviewer` | object | — | Legacy reviewer spec, also used as a fallback for groups without `reviewer` |
 | `agentGroups` | object | — | Named groups (`plan`, `code`, `review`, …) |
+
+### Retryable patterns
+
+`retryablePatterns` is a list of case-insensitive regex strings. Before each retry decision the
+orchestrator tests the error message against every pattern. If any matches, the failure is treated
+as transient and the agent is retried with exponential back-off (up to `maxRetries` attempts).
+If no pattern matches **and** the error contains an HTTP status code, the task is stopped
+immediately rather than continuing with partial results.
+
+Setting this field **replaces** the built-in defaults entirely, so include everything you still
+want to retry:
+
+```json
+"retryablePatterns": [
+  "429", "rate.?limit", "too many requests", "overloaded",
+  "503", "502", "529",
+  "TIMEOUT", "ECONNRESET", "ECONNREFUSED"
+]
+```
+
+To also retry on HTTP 500 (e.g. your provider proxy is flaky), append `"500"` to the list.
+
+### Provider error visibility
+
+Many sub-agents (e.g. Claude Code) retry transient HTTP failures internally before bubbling
+anything up over ACP, so a flaky provider proxy can stall an agent for tens of seconds while the
+chat shows only "still working" heartbeats. The orchestrator monitors each sub-agent's stderr in
+real time and surfaces lines that look like provider HTTP errors as Zed notifications, e.g.:
+
+```
+> **AKA Opus** — provider HTTP 503: Anthropic API error: 503 Service Unavailable …
+```
+
+Detection requires both an HTTP 4xx/5xx status code and an error-context word (`error`, `http`,
+`status`, `unavailable`, `timeout`, `overloaded`, …) on the same stderr line, so ordinary debug
+output is ignored. Repeated notifications for the same status code are throttled to one every 3
+seconds per agent. Lines are redacted and truncated before display.
+
+### Debug logging
+
+The above heuristics only catch error formats we already know. Different sub-agents (Claude
+Code, Copilot, etc.) report failures through different channels — sometimes ACP error
+responses, sometimes stderr, sometimes embedded in the assistant text — and you may need to
+discover the format before you can act on it.
+
+Set `debug: true` in your config (or `ORCHESTRATOR_DEBUG=1` in the environment) to mirror
+**everything** that flows between the orchestrator and each sub-agent to the orchestrator's
+stderr:
+
+- `[debug] [Agent-Name] spawned pid=12345 command=… args=[…]`
+- `[debug] [Agent-Name] → id=1 method=initialize params={…}` — every outbound ACP frame
+- `[debug] [Agent-Name] ← id=1 result={…}` — every inbound ACP frame (responses, errors, notifications)
+- `[debug] [Agent-Name] stderr: <every stderr line, verbatim>`
+- `[debug] [Agent-Name] exited code=0 signal=null`
+
+Frames are JSON-stringified, redacted with the same scrubber used for chat output, and
+truncated at 800 characters per entry. In Zed this stream shows up under **dev: open acp
+logs** as `_type: "stderr"` entries, alongside your normal orchestrator log lines. Open it
+during a failing run to see exactly which channel a sub-agent uses to report an upstream
+error, then either extend `retryablePatterns` or refine `PROVIDER_ERROR_CONTEXT_RE` (in
+`orchestrator.js`) once you know the format.
 
 ### Rate limit fields
 
