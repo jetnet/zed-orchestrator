@@ -37,6 +37,12 @@
       "type": "integer", "minimum": 0, "default": 300000,
       "description": "Cap on the Retry-After sleep derived from upstream error messages."
     },
+    "retryablePatterns": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Case-insensitive regex patterns tested against error messages to decide if a failure is transient and worth retrying. Replaces the built-in defaults: [\"429\", \"rate.?limit\", \"too many requests\", \"overloaded\", \"503\", \"502\", \"529\", \"TIMEOUT\", \"ECONNRESET\", \"ECONNREFUSED\"]. Errors NOT matched here stop the task immediately when they contain an HTTP status code."
+    },
     "maxLineBytes": {
       "type": "integer", "minimum": 1024, "default": 4194304,
       "description": "Max bytes for a single JSON-RPC line from a sub-agent (OOM guard)."
@@ -60,6 +66,10 @@
     "envIsolation": {
       "type": "boolean", "default": true,
       "description": "When true, sub-agents only inherit SAFE_ENV_KEYS plus explicit passEnv."
+    },
+    "debug": {
+      "type": "boolean", "default": false,
+      "description": "When true, every outgoing/incoming JSON-RPC frame and every line of sub-agent stderr is mirrored to the orchestrator's own stderr (visible in Zed under 'agent server logs' / 'dev: open acp logs' as stderr entries). Also enabled by setting the ORCHESTRATOR_DEBUG environment variable to any non-empty value other than '0' or 'false'. Use this to diagnose how a particular sub-agent (Claude, Copilot, etc.) reports provider failures."
     },
     "defaultGroup": {
       "type": "string", "minLength": 1,
