@@ -294,6 +294,8 @@ function runOrchestrator(cfgPath, workDir, opts = {}) {
         });
         const result = decoratePromptResult(rawResult, notifs);
 
+        if (opts.graceMs) await new Promise(r => setTimeout(r, opts.graceMs));
+
         await finish(resolve, { frames, notifs, requests, result, rawResult, stderr: stderr.join('') });
       } catch (err) {
         await finish(reject, err);
@@ -3151,7 +3153,7 @@ rl.on('line',line=>{
     },
   }));
 
-  const { result, notifs } = await runOrchestrator(cfgPath, tmpDir, {});
+  const { result, notifs } = await runOrchestrator(cfgPath, tmpDir, { graceMs: 200 });
   const streamed = notifs.map(n => n.params?.update?.content?.text || '').join('');
   const commandsUpdate = notifs.find(n =>
     n.params?.update?.sessionUpdate === 'available_commands_update');
