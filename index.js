@@ -1,5 +1,7 @@
 "use strict";
 
+const fs = require("fs");
+const path = require("path");
 const { createInterface } = require("readline");
 const { version } = require("./package.json");
 const {
@@ -115,6 +117,56 @@ function rpcToZed(method, params, timeoutMs = AGENT_TIMEOUT_MS) {
 // sessionId → { workDir, mcpServers, groupName, ctx? }
 const sessions = new Map();
 
+function persistSession(sessionId, session) {
+    if (!session || !session.workDir) return;
+    try {
+        const sessionDir = path.join(
+            session.workDir,
+            ".plan",
+            "orchestrator",
+            "sessions",
+        );
+        fs.mkdirSync(sessionDir, { recursive: true });
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-]/g, "");
+        const filePath = path.join(sessionDir, `${safeId}.json`);
+
+        const dataToSave = {
+            sessionId,
+            workDir: session.workDir,
+            mcpServers: session.mcpServers,
+            groupName: session.groupName,
+            promptCounter: session.promptCounter,
+            createdAt: session.createdAt || Date.now(),
+        };
+        fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2), "utf8");
+    } catch (err) {
+        log(`Failed to persist session ${sessionId}: ${err.message}`);
+    }
+}
+
+function loadPersistedSession(workDir, sessionId) {
+    try {
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-]/g, "");
+        const filePath = path.join(
+            workDir,
+            ".plan",
+            "orchestrator",
+            "sessions",
+            `${safeId}.json`,
+        );
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+            // Basic validation
+            if (data && data.sessionId === sessionId && data.workDir) {
+                return data;
+            }
+        }
+    } catch (err) {
+        log(`Failed to load persisted session ${sessionId}: ${err.message}`);
+    }
+    return null;
+}
+
 // ─── Message loop ─────────────────────────────────────────────────────────────
 
 const rl = createInterface({ input: process.stdin });
@@ -155,13 +207,13 @@ rl.on("line", async (line) => {
             agentCapabilities: {
                 promptCapabilities: { image: true, embeddedContext: true },
                 mcpCapabilities: { http: true, sse: false },
-                sessionCapabilities: { close: {} },
+                sessionCapabilities: { close: {}, resume: {} },
             },
             authMethods: [],
         });
     } else if (msg.method === "session/new") {
         const sessionId = `orch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        sessions.set(sessionId, {
+        const session = {
             workDir:
                 msg.params?.cwd ||
                 msg.params?.workingDirectory ||
@@ -169,9 +221,46 @@ rl.on("line", async (line) => {
             mcpServers: msg.params?.mcpServers || [],
             groupName: DEFAULT_GROUP,
             promptCounter: 0,
-        });
+            createdAt: Date.now(),
+        };
+        sessions.set(sessionId, session);
+        persistSession(sessionId, session);
         log(`Session created: ${sessionId}, group=${DEFAULT_GROUP}`);
         reply(msg.id, { sessionId });
+        scheduleAvailableCommands(sessionId);
+    } else if (msg.method === "session/resume") {
+        const sessionId = msg.params?.sessionId;
+        if (!sessionId) {
+            send({
+                jsonrpc: "2.0",
+                id: msg.id,
+                error: { code: -32602, message: "Missing sessionId" },
+            });
+            return;
+        }
+        if (!sessions.has(sessionId)) {
+            const loadedData = loadPersistedSession(process.cwd(), sessionId);
+            if (loadedData) {
+                sessions.set(sessionId, {
+                    workDir: loadedData.workDir,
+                    mcpServers: loadedData.mcpServers || [],
+                    groupName: loadedData.groupName || DEFAULT_GROUP,
+                    promptCounter: loadedData.promptCounter || 0,
+                    createdAt: loadedData.createdAt || Date.now(),
+                });
+                log(
+                    `Session resumed: ${sessionId}, group=${loadedData.groupName}`,
+                );
+            } else {
+                send({
+                    jsonrpc: "2.0",
+                    id: msg.id,
+                    error: { code: -32000, message: "Session not found" },
+                });
+                return;
+            }
+        }
+        reply(msg.id, {});
         scheduleAvailableCommands(sessionId);
     } else if (msg.method === "session/prompt") {
         const { sessionId, prompt } = msg.params;
@@ -278,6 +367,7 @@ rl.on("line", async (line) => {
                 session.groupName = DEFAULT_GROUP;
             }
             session.ctx = null;
+            persistSession(sessionId, session);
         }
 
         if (finalResult) {
