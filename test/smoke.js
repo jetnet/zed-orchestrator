@@ -294,7 +294,7 @@ function runOrchestrator(cfgPath, workDir, opts = {}) {
         });
         const result = decoratePromptResult(rawResult, notifs);
 
-        await finish(resolve, { frames, notifs, requests, result, rawResult });
+        await finish(resolve, { frames, notifs, requests, result, rawResult, stderr: stderr.join('') });
       } catch (err) {
         await finish(reject, err);
       }
@@ -5242,6 +5242,140 @@ async function test_approved_plan_index_does_not_read_symlinked_index() {
   fs.rmSync(outside, { recursive: true, force: true });
 }
 
+async function test_provider_stderr_errors_surfaced_to_user() {
+  console.log('\n[Test 80] provider HTTP errors emitted on sub-agent stderr surface as notifications');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-test-'));
+
+  // Sub-agent that writes a 503 line to stderr before responding successfully.
+  // Models the scenario where the sub-agent retries provider errors internally:
+  // the orchestrator never gets an ACP error, but the user still needs to see the failure.
+  const sub = path.join(tmpDir, 'sub.js');
+  fs.writeFileSync(sub, `
+const {createInterface}=require('readline');
+const rl=createInterface({input:process.stdin});
+const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+rl.on('line',line=>{
+  let msg;try{msg=JSON.parse(line);}catch{return;}
+  if(msg.method==='initialize'){
+    process.stderr.write('Anthropic API error: 503 Service Unavailable (retrying internally)\\n');
+    send({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,agentInfo:{name:'sub',version:'1'},agentCapabilities:{}}});
+  }
+  else if(msg.method==='session/new') send({jsonrpc:'2.0',id:msg.id,result:{sessionId:'s'}});
+  else if(msg.method==='session/prompt'){
+    process.stderr.write('debug: Anthropic API error: 503 Service Unavailable (retrying internally)\\n');
+    process.stderr.write('debug: Anthropic API error: 503 Service Unavailable (retrying internally)\\n'); // throttled — same code within 3s
+    process.stderr.write('debug: HTTP 500 internal server error from upstream\\n');
+    process.stderr.write('debug: just a regular log line, no status code here\\n');
+    send({jsonrpc:'2.0',id:msg.id,result:{stopReason:'end_turn',content:[{type:'text',text:'eventually succeeded'}]}});
+  }
+});
+`);
+
+  const reviewerPath = path.join(tmpDir, 'reviewer.js');
+  writeStubScript(reviewerPath, 'APPROVED: ok.');
+
+  const cfgPath = path.join(tmpDir, 'agents.config.json');
+  fs.writeFileSync(cfgPath, JSON.stringify({
+    maxTurns: 1, maxRetries: 0, agentTimeoutMs: 5000,
+    subAgents: [{ name: 'NoisyAgent', command: 'node', args: [sub], env: {} }],
+    reviewer:  { name: 'Reviewer',   command: 'node', args: [reviewerPath], env: {} },
+  }));
+
+  const { result, notifs } = await runOrchestrator(cfgPath, tmpDir);
+
+  assert('stopReason is end_turn', result?.stopReason === 'end_turn');
+
+  const text = streamedText(notifs);
+  assert('503 from stderr surfaced as provider HTTP notification',
+    /provider HTTP 503/.test(text), text);
+  assert('500 from stderr surfaced as provider HTTP notification',
+    /provider HTTP 500/.test(text), text);
+  assert('non-error stderr lines do not produce false positives',
+    !/just a regular log line/.test(text), text);
+
+  // Throttling: only one 503 notification despite multiple stderr lines (within 3s window)
+  const count503 = (text.match(/provider HTTP 503/g) || []).length;
+  assert('repeated 503 stderr lines are throttled', count503 === 1, `count=${count503}`);
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
+async function test_debug_log_mirrors_acp_frames_and_stderr() {
+  console.log('\n[Test 81] cfg.debug=true mirrors ACP frames and sub-agent stderr to orchestrator stderr');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-test-'));
+
+  const sub = path.join(tmpDir, 'sub.js');
+  fs.writeFileSync(sub, `
+const {createInterface}=require('readline');
+const rl=createInterface({input:process.stdin});
+const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+rl.on('line',line=>{
+  let msg;try{msg=JSON.parse(line);}catch{return;}
+  if(msg.method==='initialize'){
+    process.stderr.write('debug-test-stderr-marker-init\\n');
+    send({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,agentInfo:{name:'sub',version:'1'},agentCapabilities:{}}});
+  }
+  else if(msg.method==='session/new') send({jsonrpc:'2.0',id:msg.id,result:{sessionId:'s'}});
+  else if(msg.method==='session/prompt') send({jsonrpc:'2.0',id:msg.id,result:{stopReason:'end_turn',content:[{type:'text',text:'ok'}]}});
+});
+`);
+
+  const reviewerPath = path.join(tmpDir, 'reviewer.js');
+  writeStubScript(reviewerPath, 'APPROVED: ok.');
+
+  const cfgPath = path.join(tmpDir, 'agents.config.json');
+  fs.writeFileSync(cfgPath, JSON.stringify({
+    debug: true,
+    maxTurns: 1, maxRetries: 0, agentTimeoutMs: 5000,
+    subAgents: [{ name: 'DebugSub', command: 'node', args: [sub], env: {} }],
+    reviewer:  { name: 'Reviewer', command: 'node', args: [reviewerPath], env: {} },
+  }));
+
+  const { result, stderr } = await runOrchestrator(cfgPath, tmpDir);
+
+  assert('stopReason is end_turn', result?.stopReason === 'end_turn');
+  assert('debug log activation banner present',
+    /debug logging enabled/.test(stderr), stderr.slice(0, 400));
+  assert('outgoing initialize frame logged',
+    /\[debug\] \[DebugSub\] → .*method=initialize/.test(stderr), stderr.slice(0, 600));
+  assert('incoming initialize result logged',
+    /\[debug\] \[DebugSub\] ← .*result=/.test(stderr), stderr.slice(0, 600));
+  assert('sub-agent stderr line mirrored to debug log',
+    /\[debug\] \[DebugSub\] stderr: debug-test-stderr-marker-init/.test(stderr), stderr.slice(0, 600));
+  assert('process spawn logged with pid',
+    /\[debug\] \[DebugSub\] spawned pid=\d+/.test(stderr), stderr.slice(0, 600));
+  assert('process exit logged',
+    /\[debug\] \[DebugSub\] exited code=/.test(stderr), stderr.slice(0, 600));
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
+async function test_debug_log_disabled_by_default() {
+  console.log('\n[Test 82] without cfg.debug debug-prefixed lines are not emitted');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-test-'));
+
+  const sub = path.join(tmpDir, 'sub.js');
+  writeStubScript(sub, 'no-debug-result');
+
+  const reviewerPath = path.join(tmpDir, 'reviewer.js');
+  writeStubScript(reviewerPath, 'APPROVED: ok.');
+
+  const cfgPath = path.join(tmpDir, 'agents.config.json');
+  fs.writeFileSync(cfgPath, JSON.stringify({
+    maxTurns: 1, maxRetries: 0, agentTimeoutMs: 5000,
+    subAgents: [{ name: 'QuietSub', command: 'node', args: [sub], env: {} }],
+    reviewer:  { name: 'Reviewer', command: 'node', args: [reviewerPath], env: {} },
+  }));
+
+  const { result, stderr } = await runOrchestrator(cfgPath, tmpDir);
+
+  assert('stopReason is end_turn', result?.stopReason === 'end_turn');
+  assert('no [debug] lines without explicit opt-in',
+    !/\[debug\]/.test(stderr), stderr.slice(0, 400));
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
 // ─── Integration tests (require RUN_INTEGRATION_TESTS=1 and real CLI binaries) ─
 
 async function test_integration_real_claude_acp() {
@@ -5378,6 +5512,9 @@ async function test_integration_real_claude_acp() {
     await T(test_single_writer_no_retry_without_proxied_side_effect);
     await T(test_permission_objects_are_strict_without_schema_dependency);
     await T(test_approved_plan_index_does_not_read_symlinked_index);
+    await T(test_provider_stderr_errors_surfaced_to_user);
+    await T(test_debug_log_mirrors_acp_frames_and_stderr);
+    await T(test_debug_log_disabled_by_default);
     // Integration (gated on env)
     await T(test_integration_real_claude_acp);
   } catch (err) {
