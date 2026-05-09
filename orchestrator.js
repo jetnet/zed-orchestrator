@@ -26,20 +26,23 @@ const { redact } = require('./redact');
 const {
   MAX_TURNS, AGENT_GROUPS, WORKFLOW, MCP_SERVERS,
   AGENT_TIMEOUT_MS, MAX_RETRIES, RETRY_DELAY_MS, HEARTBEAT_MS,
-  MAX_RETRY_AFTER_MS, MAX_LINE_BYTES, MAX_OUTPUT_BYTES, REVIEWER_AGENT_CHARS,
-  RATE_LIMITS, PROBE_TIMEOUT_MS,
+  MAX_RETRY_AFTER_MS, RETRYABLE_PATTERNS,
+  MAX_LINE_BYTES, MAX_OUTPUT_BYTES, REVIEWER_AGENT_CHARS,
+  RATE_LIMITS, PROBE_TIMEOUT_MS, DEBUG_LOG,
 } = require('./config');
 
 const rateLimiter = new RateLimiterRegistry(RATE_LIMITS);
 
 const log = (...args) => process.stderr.write('[orchestrator] ' + args.join(' ') + '\n');
 
+const debugLog = DEBUG_LOG
+  ? msg => process.stderr.write(`[orchestrator] [debug] ${msg}\n`)
+  : null;
+if (debugLog) debugLog('debug logging enabled — full ACP frames + sub-agent stderr will be mirrored to stderr');
+
 // ─── Error classification ─────────────────────────────────────────────────────
 
-const RETRYABLE = [
-  /429/, /rate.?limit/i, /too many requests/i, /overloaded/i,
-  /503/, /502/, /529/, /TIMEOUT/, /ECONNRESET/, /ECONNREFUSED/,
-];
+const RETRYABLE = RETRYABLE_PATTERNS.map(p => new RegExp(p, 'i'));
 
 function isRetryable(err) {
   const msg = err?.message || String(err);
@@ -52,6 +55,29 @@ function retryAfterMs(err) {
   const ms = parseInt(m[1], 10) * 1000;
   if (!Number.isFinite(ms) || ms < 0) return null;
   return Math.min(ms, MAX_RETRY_AFTER_MS);
+}
+
+function extractHttpStatus(msg) {
+  const m = String(msg || '').match(/\b([45]\d{2})\b/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Heuristic: a stderr line is treated as a provider error if it contains a 4xx/5xx
+// HTTP status code together with vocabulary that strongly implies an HTTP/API failure.
+// This keeps ordinary debug noise out while catching the common provider error formats.
+const PROVIDER_ERROR_CONTEXT_RE =
+  /\b(error|err|fail|exception|unavailable|gateway|timeout|forbidden|unauthorized|api|http|status|request|response|overloaded|rate.?limit|too\s+many|server|service)\b/i;
+
+function detectProviderError(line) {
+  const code = extractHttpStatus(line);
+  if (!code) return null;
+  if (!PROVIDER_ERROR_CONTEXT_RE.test(line)) return null;
+  return code;
+}
+
+function truncateLine(line, max = 240) {
+  const s = String(line).trim();
+  return s.length <= max ? s : s.slice(0, max) + '…';
 }
 
 async function sleepInterruptible(ms, isCancelled) {
@@ -317,6 +343,7 @@ async function probeAgent(agentCfg, workDir, notifyZed, registerClient, isCancel
   const client = new AcpClient(agentCfg, workDir, {
     maxLineBytes:   MAX_LINE_BYTES,
     maxOutputBytes: MAX_OUTPUT_BYTES,
+    debugLog,
   });
   const unregister = registerClient?.(client);
   try {
@@ -396,7 +423,8 @@ function normalizeMcpServerForChild(server) {
 
 async function runAgent(agentCfg, workDir, promptContent, mcpServers = MCP_SERVERS,
                         onRateLimit, registerClient, onHeartbeat, isCancelled,
-                        onChildRequest, policy, onWarning, zedClientCapabilities) {
+                        onChildRequest, policy, onWarning, zedClientCapabilities,
+                        onProviderError) {
   const rateLimitKey = rateLimiter.keyFor(agentCfg);
   await rateLimiter.acquire(agentCfg, waitMs => onRateLimit?.(waitMs, rateLimitKey), isCancelled);
 
@@ -414,10 +442,25 @@ async function runAgent(agentCfg, workDir, promptContent, mcpServers = MCP_SERVE
     return Math.ceil(left);
   };
 
+  // Throttle provider-error notifications: at most one per (code) every 3s,
+  // so a flood of repeated 503s from a flaky proxy doesn't drown the chat.
+  const lastNotifiedByCode = new Map();
+  const onStderrLine = onProviderError ? line => {
+    const code = detectProviderError(line);
+    if (!code) return;
+    const now = Date.now();
+    const last = lastNotifiedByCode.get(code) || 0;
+    if (now - last < 3000) return;
+    lastNotifiedByCode.set(code, now);
+    onProviderError(code, redact(truncateLine(line)));
+  } : null;
+
   const client = new AcpClient(agentCfg, workDir, {
     maxLineBytes:   MAX_LINE_BYTES,
     maxOutputBytes: MAX_OUTPUT_BYTES,
     onRequest: onChildRequest,
+    onStderrLine,
+    debugLog,
   });
   const unregister = registerClient?.(client);
 
@@ -457,7 +500,7 @@ async function runAgent(agentCfg, workDir, promptContent, mcpServers = MCP_SERVE
 async function runAgentWithRetry(agentCfg, workDir, promptContent, mcpServers,
                                  onRetry, onRateLimit, registerClient, isCancelled,
                                  onHeartbeat, onChildRequest, policy, onWarning,
-                                 zedClientCapabilities, retryState) {
+                                 zedClientCapabilities, retryState, onProviderError) {
   const maxRetries = agentCfg.maxRetries ?? MAX_RETRIES;
   const baseDelay  = agentCfg.retryDelayMs ?? RETRY_DELAY_MS;
 
@@ -466,7 +509,7 @@ async function runAgentWithRetry(agentCfg, workDir, promptContent, mcpServers,
     try {
       return await runAgent(agentCfg, workDir, promptContent, mcpServers, onRateLimit,
                             registerClient, onHeartbeat, isCancelled, onChildRequest,
-                            policy, onWarning, zedClientCapabilities);
+                            policy, onWarning, zedClientCapabilities, onProviderError);
     } catch (err) {
       if (isCancelled?.()) throw new Error('CANCELLED');
       const retriable = isRetryable(err);
@@ -628,6 +671,9 @@ async function orchestrate(sessionId, runId, promptId, task, workDir, group, ctx
             warning => notifyText(sessionId, `> **${cfg.name}** — ${warning}\n`),
             zedClientCapabilities,
             retryState,
+            (code, line) => {
+              notifyText(sessionId, `> **${cfg.name}** — provider HTTP ${code}: ${line}\n`);
+            },
           ),
           isCancelled
         );
@@ -642,6 +688,7 @@ async function orchestrate(sessionId, runId, promptId, task, workDir, group, ctx
           result: null,
           usage: null,
           error: redact(s.reason?.message || String(s.reason)),
+          fatal: !isRetryable(s.reason),
         };
       }
       const outcome = s.value || {};
@@ -664,7 +711,9 @@ async function orchestrate(sessionId, runId, promptId, task, workDir, group, ctx
 
     for (const { name, result, error, usage } of subResults) {
       if (error) {
-        notifyText(sessionId, `\n### ${name}\n> **FAILED**: ${error}\n`);
+        const httpCode = extractHttpStatus(error);
+        const label = httpCode ? `ERROR HTTP ${httpCode}` : 'FAILED';
+        notifyText(sessionId, `\n### ${name}\n> **${label}**: ${error}\n`);
       } else {
         const usageLine = usage
           ? `\n> tokens: ${usage.inputTokens ?? '?'} in / ${usage.outputTokens ?? '?'} out\n`
@@ -680,6 +729,21 @@ async function orchestrate(sessionId, runId, promptId, task, workDir, group, ctx
         '',
         ...subResults.map(r => `- **${r.name}**: ${r.error}`),
       ].join('\n') };
+    }
+
+    const fatalErrors = subResults.filter(r => r.fatal && extractHttpStatus(r.error) !== null);
+    if (fatalErrors.length > 0) {
+      return {
+        approved: false,
+        text: [
+          '**Task stopped — unrecoverable provider error:**',
+          '',
+          ...fatalErrors.map(r => {
+            const code = extractHttpStatus(r.error);
+            return `- **${r.name}**: [HTTP ${code}] ${r.error}`;
+          }),
+        ].join('\n'),
+      };
     }
 
     const failedNote = subResults.filter(r => r.error).length
@@ -774,10 +838,21 @@ QUESTIONS:
         warning => notifyText(sessionId, `> **${reviewer.name}** — ${warning}\n`),
         zedClientCapabilities,
         reviewerRetryState,
+        (code, line) => {
+          notifyText(sessionId, `> **${reviewer.name}** — provider HTTP ${code}: ${line}\n`);
+        },
       );
     } catch (err) {
       if (isCancelled()) return { text: '**Cancelled by user.**', approved: false };
-      notifyText(sessionId, `> **Reviewer failed permanently**: ${redact(err.message)}\n`);
+      const reviewerErrMsg = redact(err.message);
+      const reviewerHttpCode = extractHttpStatus(err.message);
+      notifyText(sessionId, `> **Reviewer failed permanently**: ${reviewerErrMsg}\n`);
+      if (!isRetryable(err) && reviewerHttpCode !== null) {
+        return {
+          approved: false,
+          text: `**Task stopped — unrecoverable provider error in reviewer (HTTP ${reviewerHttpCode})**: ${reviewerErrMsg}`,
+        };
+      }
       return { approved: false, text: [
         '**Reviewer could not complete — returning best available sub-agent results.**',
         '',

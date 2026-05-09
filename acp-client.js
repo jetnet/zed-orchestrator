@@ -166,6 +166,12 @@ function spawnSpec(agentCfg) {
 const DEFAULT_MAX_LINE_BYTES   = 4 * 1024 * 1024;
 const DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_PROTOCOL_VERSION = 1;
+const DEBUG_TRUNCATE = 800;
+
+function truncate(s, max = DEBUG_TRUNCATE) {
+  s = String(s == null ? '' : s);
+  return s.length <= max ? s : s.slice(0, max) + '…';
+}
 
 class AcpClient {
   constructor(agentCfg, workDir, opts = {}) {
@@ -182,9 +188,12 @@ class AcpClient {
     this._stderrText  = '';
     this._pid       = null;
     this._onRequest = opts.onRequest || null;
+    this._onStderrLine = opts.onStderrLine || null;
+    this._debugLog = opts.debugLog || null;
     this._killGraceMs = opts.killGraceMs ?? 1000;
     this._killTimer = null;
     this._exited = false;
+    this._stderrLineBuf = '';
 
     const isWindows = process.platform === 'win32';
     try {
@@ -202,6 +211,8 @@ class AcpClient {
       return;
     }
 
+    this._debug(`spawned pid=${this._pid} command=${command} args=${JSON.stringify(args)}`);
+
     const fail = (err) => this._fail(err);
 
     this.proc.on('error', err => {
@@ -211,6 +222,7 @@ class AcpClient {
 
     this.proc.on('exit', (code, signal) => {
       this._exited = true;
+      this._debug(`exited code=${code} signal=${signal}`);
       if (this._killTimer) {
         clearTimeout(this._killTimer);
         this._killTimer = null;
@@ -270,6 +282,31 @@ class AcpClient {
       if (this._stderrText.length > 8192) {
         this._stderrText = this._stderrText.slice(-8192);
       }
+
+      if (this._onStderrLine || this._debugLog) {
+        this._stderrLineBuf += chunk;
+        let match;
+        while ((match = this._stderrLineBuf.match(/[\r\n]/)) !== null) {
+          const idx = match.index;
+          let line = this._stderrLineBuf.slice(0, idx);
+          const char = match[0];
+          
+          if (char === '\r' && this._stderrLineBuf[idx + 1] === '\n') {
+            this._stderrLineBuf = this._stderrLineBuf.slice(idx + 2);
+          } else {
+            this._stderrLineBuf = this._stderrLineBuf.slice(idx + 1);
+          }
+          if (line) {
+            this._debug(`stderr: ${line}`);
+            if (this._onStderrLine) {
+              try { this._onStderrLine(line); } catch {}
+            }
+          }
+        }
+        if (this._stderrLineBuf.length > this._maxLine) {
+          this._stderrLineBuf = this._stderrLineBuf.slice(-this._maxLine);
+        }
+      }
     });
   }
 
@@ -284,9 +321,34 @@ class AcpClient {
     this._terminateProcess();
   }
 
+  _debug(msg) {
+    if (!this._debugLog) return;
+    try { this._debugLog(`[${this.name}] ${msg}`); } catch {}
+  }
+
+  _summarizeFrame(msg) {
+    const idPart = msg.id !== undefined && msg.id !== null ? `id=${JSON.stringify(msg.id)} ` : '';
+    let body;
+    if (msg.method) {
+      const params = msg.params !== undefined ? ` params=${truncate(redact(JSON.stringify(msg.params)))}` : '';
+      body = `method=${msg.method}${params}`;
+    } else if (msg.error) {
+      body = `error=${truncate(redact(JSON.stringify(msg.error)))}`;
+    } else if (msg.result !== undefined) {
+      body = `result=${truncate(redact(JSON.stringify(msg.result)))}`;
+    } else {
+      body = truncate(redact(JSON.stringify(msg)));
+    }
+    return `${idPart}${body}`;
+  }
+
   _handleLine(line) {
     let msg;
-    try { msg = JSON.parse(line); } catch { return; }
+    try { msg = JSON.parse(line); } catch {
+      this._debug(`← non-json: ${truncate(redact(line))}`);
+      return;
+    }
+    this._debug(`← ${this._summarizeFrame(msg)}`);
 
     if (msg.method == null && msg.id != null && this._pending.has(msg.id)) {
       const { resolve, reject } = this._pending.get(msg.id);
@@ -306,6 +368,7 @@ class AcpClient {
   }
 
   _writeFrame(msg) {
+    this._debug(`→ ${this._summarizeFrame(msg)}`);
     const frame = JSON.stringify(msg) + '\n';
     try {
       if (this.proc?.stdin?.writable) this.proc.stdin.write(frame);
@@ -380,7 +443,9 @@ class AcpClient {
         );
       }
 
-      const frame = JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
+      const outgoing = { jsonrpc: '2.0', id, method, params };
+      this._debug(`→ ${this._summarizeFrame(outgoing)}`);
+      const frame = JSON.stringify(outgoing) + '\n';
       try {
         if (!this.proc.stdin.writable) {
           throw new Error(`stdin not writable for ${this.name}`);
