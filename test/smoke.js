@@ -4350,6 +4350,7 @@ async function test_plan_artifacts_are_written() {
 
     const { result } = await runOrchestrator(cfgPath, tmpDir);
     assert("prompt completed", result?.stopReason === "end_turn");
+    const text = result?.content?.[0]?.text || "";
 
     const artifactRoot = path.join(tmpDir, ".plan", "orchestrator");
     const files = [];
@@ -4389,6 +4390,12 @@ async function test_plan_artifacts_are_written() {
         "approved plan contains reproducibility hash",
         fs.readFileSync(approved, "utf8").includes("sha256:"),
         fs.readFileSync(approved, "utf8"),
+    );
+    assert(
+        "approved plan location is surfaced to the user",
+        text.includes("Approved plan saved to `.plan/orchestrator/") &&
+            text.includes("/approved-plan.md`"),
+        text,
     );
     assert(
         "sub-agent report contains raw output",
@@ -6333,6 +6340,69 @@ async function test_cred_home_cannot_be_overridden_by_env_or_passenv() {
         "GEMINI_CLI_HOME is forced under credHome",
         env.GEMINI_CLI_HOME === path.join(credHome, "gemini"),
         env.GEMINI_CLI_HOME,
+    );
+
+    const kiloOne = buildChildEnv(
+        {
+            name: "Kilo Test Agent",
+            command: "npx",
+            args: ["--package", "@kilocode/cli@1.0.0", "kilo", "acp"],
+            envIsolation: true,
+            credHome,
+            env: {
+                KILO_CONFIG_DIR: "/env/kilo/config/escape",
+                KILO_DB: "/env/kilo/db/escape.db",
+            },
+            passEnv: ["KILO_CONFIG_DIR", "KILO_DB"],
+        },
+        tmpDir,
+    );
+    const kiloTwo = buildChildEnv(
+        {
+            name: "Kilo Test Agent",
+            command: "npx",
+            args: ["--package", "@kilocode/cli@1.0.0", "kilo", "acp"],
+            envIsolation: true,
+            credHome,
+        },
+        tmpDir,
+    );
+    assert(
+        "KILO_CONFIG_DIR is forced under credHome",
+        kiloOne.KILO_CONFIG_DIR === path.join(credHome, ".config", "kilo"),
+        kiloOne.KILO_CONFIG_DIR,
+    );
+    assert(
+        "KILO_DB is per-spawn and under credHome",
+        kiloOne.KILO_DB.startsWith(
+            path.join(credHome, ".local", "share", "kilo", "runtime") +
+                path.sep,
+        ) && kiloOne.KILO_DB !== kiloTwo.KILO_DB,
+        `${kiloOne.KILO_DB} / ${kiloTwo.KILO_DB}`,
+    );
+
+    const kiloNoCredHome = buildChildEnv(
+        {
+            name: "Kilo No CredHome",
+            command: "npx",
+            args: ["--package", "@kilocode/cli@latest", "kilo", "acp"],
+            envIsolation: false,
+            env: { KILO_DB: "/global/kilo.db" },
+        },
+        tmpDir,
+    );
+    assert(
+        "Kilo gets isolated KILO_DB even without credHome",
+        kiloNoCredHome.KILO_DB.startsWith(
+            path.join(
+                os.tmpdir(),
+                "zed-orchestrator",
+                "kilo",
+                "kilo-no-credhome",
+                "runtime",
+            ) + path.sep,
+        ) && kiloNoCredHome.KILO_DB !== "/global/kilo.db",
+        kiloNoCredHome.KILO_DB,
     );
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -8654,8 +8724,8 @@ async function test_session_resume() {
     try {
         const initRes = await rpc("initialize", { protocolVersion: 1 });
         assert(
-            "initialize advertises resume only",
-            initRes.agentCapabilities.sessionCapabilities.resume &&
+            "initialize does not advertise resume (untested restart path)",
+            !initRes.agentCapabilities.sessionCapabilities.resume &&
                 !initRes.agentCapabilities.sessionCapabilities.load,
             `got: ${JSON.stringify(initRes)}`,
         );
@@ -8684,7 +8754,7 @@ async function test_session_resume() {
         const badResume = await rpc("session/resume", { sessionId: "nope" });
         assert(
             "session/resume rejects unknown id",
-            badResume.code === -32000,
+            badResume.code === -32002,
             `got: ${badResume.code}`,
         );
 
@@ -8693,7 +8763,7 @@ async function test_session_resume() {
         });
         assert(
             "session/resume rejects path traversal",
-            pathTraversal.code === -32000,
+            pathTraversal.code === -32002,
         );
 
         const closeRes = await rpc("session/close", { sessionId });

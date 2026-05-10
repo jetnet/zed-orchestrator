@@ -207,7 +207,7 @@ rl.on("line", async (line) => {
             agentCapabilities: {
                 promptCapabilities: { image: true, embeddedContext: true },
                 mcpCapabilities: { http: true, sse: false },
-                sessionCapabilities: { close: {}, resume: {} },
+                sessionCapabilities: { close: {} },
             },
             authMethods: [],
         });
@@ -239,7 +239,8 @@ rl.on("line", async (line) => {
             return;
         }
         if (!sessions.has(sessionId)) {
-            const loadedData = loadPersistedSession(process.cwd(), sessionId);
+            // Zed sends the project root as `cwd` — use it so we look in the right directory.
+            const loadedData = loadPersistedSession(msg.params?.cwd, sessionId);
             if (loadedData) {
                 sessions.set(sessionId, {
                     workDir: loadedData.workDir,
@@ -255,7 +256,10 @@ rl.on("line", async (line) => {
                 send({
                     jsonrpc: "2.0",
                     id: msg.id,
-                    error: { code: -32000, message: "Session not found" },
+                    // -32002 = ResourceNotFound in ACP protocol.
+                    // Do NOT use -32000: that is AuthRequired in ACP and
+                    // causes Zed to show "Authentication required" instead.
+                    error: { code: -32002, message: "Session not found" },
                 });
                 return;
             }
@@ -270,7 +274,7 @@ rl.on("line", async (line) => {
                 jsonrpc: "2.0",
                 id: msg.id,
                 error: {
-                    code: -32000,
+                    code: -32002, // ResourceNotFound
                     message: `Unknown session: ${sessionId}`,
                 },
             });
@@ -281,7 +285,7 @@ rl.on("line", async (line) => {
                 jsonrpc: "2.0",
                 id: msg.id,
                 error: {
-                    code: -32000,
+                    code: -32603, // InternalError
                     message: "Session busy: a prompt is already in progress",
                 },
             });

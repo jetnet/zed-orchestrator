@@ -65,8 +65,44 @@ const CRED_HOME_KEYS = [
     "GEMINI_CLI_HOME",
     "CLAUDE_CONFIG_DIR",
     "OPENCODE_CONFIG_DIR",
+    "KILO_CONFIG_DIR",
+    "KILO_DB",
+    "KILO_LANCEDB_PATH",
 ];
 const CRED_HOME_KEY_SET = new Set(CRED_HOME_KEYS);
+
+function runtimeSlug(value) {
+    return (
+        String(value || "agent")
+            .toLowerCase()
+            .replace(/[^a-z0-9._-]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 48) || "agent"
+    );
+}
+
+function isKiloAgent(agentCfg = {}) {
+    const parts = [agentCfg.command, ...(agentCfg.args || [])].map((v) =>
+        String(v || "").toLowerCase(),
+    );
+    return parts.some(
+        (part) =>
+            part === "kilo" ||
+            part.endsWith("/kilo") ||
+            part.includes("@kilocode/cli"),
+    );
+}
+
+function applyKiloRuntimeEnv(env, agentCfg = {}, dataDir, options = {}) {
+    const runtimeDir = path.join(dataDir, "runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+    if (options.configDir) env.KILO_CONFIG_DIR = options.configDir;
+    env.KILO_LANCEDB_PATH = path.join(dataDir, "lancedb");
+    env.KILO_DB = path.join(
+        runtimeDir,
+        `${runtimeSlug(agentCfg.name)}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.db`,
+    );
+}
 
 function utf8ByteLength(text) {
     return Buffer.byteLength(text, "utf8");
@@ -139,7 +175,7 @@ function assertCredHomeSafe(credHome, abs, workDir) {
     }
 }
 
-function applyCredHome(env, credHome, workDir) {
+function applyCredHome(env, credHome, workDir, agentCfg = {}) {
     const abs = resolveCredHome(credHome, workDir);
     assertSafeToCreate(credHome, workDir, abs);
     ensureCredHome(abs);
@@ -160,19 +196,35 @@ function applyCredHome(env, credHome, workDir) {
     env.CLAUDE_CONFIG_DIR = path.join(abs, "claude");
     env.OPENCODE_CONFIG_DIR = path.join(abs, "opencode");
 
+    if (isKiloAgent(agentCfg)) {
+        const dataDir = path.join(abs, ".local", "share", "kilo");
+        applyKiloRuntimeEnv(env, agentCfg, dataDir, {
+            configDir: path.join(abs, ".config", "kilo"),
+        });
+    }
+
     return env;
 }
 
-function buildChildEnv(
-    {
+function applyKiloRuntimeEnvWithoutCredHome(env, agentCfg = {}) {
+    const dataDir = path.join(
+        os.tmpdir(),
+        "zed-orchestrator",
+        "kilo",
+        runtimeSlug(agentCfg.name),
+    );
+    applyKiloRuntimeEnv(env, agentCfg, dataDir);
+    return env;
+}
+
+function buildChildEnv(agentCfg = {}, workDir) {
+    const {
         env = {},
         passEnv = [],
         envIsolation = false,
         credHome = null,
         allowRealHome = false,
-    },
-    workDir,
-) {
+    } = agentCfg;
     let base;
     if (!envIsolation) {
         base = { ...process.env };
@@ -194,7 +246,11 @@ function buildChildEnv(
 
     const merged = { ...base, ...env };
     // Per-agent credential home is applied last so env/passEnv cannot escape it.
-    return credHome ? applyCredHome(merged, credHome, workDir) : merged;
+    if (credHome) return applyCredHome(merged, credHome, workDir, agentCfg);
+    if (isKiloAgent(agentCfg)) {
+        return applyKiloRuntimeEnvWithoutCredHome(merged, agentCfg);
+    }
+    return merged;
 }
 
 function spawnSpec(agentCfg) {

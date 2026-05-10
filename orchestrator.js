@@ -1253,6 +1253,7 @@ QUESTIONS:
                 group: group.name,
                 createdAt: new Date().toISOString(),
             };
+            const approvedRelPath = path.relative(workDir, approvedPath);
             ctx.latestApprovedPlans = {
                 ...(ctx.latestApprovedPlans || {}),
                 [group.name]: planMeta,
@@ -1263,7 +1264,10 @@ QUESTIONS:
                 sessionId,
                 planMeta,
             );
-            return { text: approvedText, approved: true };
+            return {
+                text: `${approvedText}\n\n> Approved plan saved to \`${approvedRelPath}\`.`,
+                approved: true,
+            };
         }
 
         questions =

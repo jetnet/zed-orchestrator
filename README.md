@@ -526,7 +526,11 @@ Add a `credHome` to each agent that points to a dedicated directory:
 
 The orchestrator creates the directory and sets the agent's `HOME`, `XDG_CONFIG_HOME`,
 `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, and provider-specific homes such as
-`CODEX_HOME`, `GEMINI_CLI_HOME`, `CLAUDE_CONFIG_DIR`, and `OPENCODE_CONFIG_DIR` to paths inside it.
+`CODEX_HOME`, `GEMINI_CLI_HOME`, `CLAUDE_CONFIG_DIR`, `OPENCODE_CONFIG_DIR`,
+and `KILO_CONFIG_DIR` to paths inside it. For every Kilo Code agent, the orchestrator also
+sets a per-spawn `KILO_DB` so parallel Kilo ACP processes do not contend for the same global
+SQLite database at startup. With `credHome`, that database is placed under `credHome`; without
+`credHome`, it is placed under the system temp directory.
 When `credHome` is set, `env` and `passEnv` cannot override those home keys.
 
 **Important:** After setting `credHome`, you must authenticate each agent inside its isolated
