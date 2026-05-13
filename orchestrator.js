@@ -11,6 +11,7 @@ const {
     maskClientCapabilities,
     assertAllowedClientRequest,
     classifyClientMethod,
+    classifyPermissionRequest,
     filterPromptContentForCapabilities,
 } = require("./policy");
 const {
@@ -739,11 +740,13 @@ async function orchestrate(
         }
         assertAllowedClientRequest(msg, policy, agentCfg.name);
         const kind = classifyClientMethod(msg?.method);
+        const permissionKind =
+            kind === "permission" ? classifyPermissionRequest(msg?.params) : null;
         if (
             kind === "write" ||
             kind === "fs_unknown" ||
             kind === "terminal" ||
-            kind === "permission"
+            (kind === "permission" && permissionKind !== "read")
         ) {
             if (retryState) retryState.hadSideEffect = true;
         }

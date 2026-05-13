@@ -131,7 +131,15 @@ function classifyPermissionRequest(params = {}) {
   if (haystack.includes('delete') || haystack.includes('remove') || haystack.includes('move') || haystack.includes('rename')) {
     return 'write';
   }
-  if (haystack.includes('fs.read') || haystack.includes('read')) {
+  if (
+    kind === 'read' ||
+    kind === 'fetch' ||
+    kind === 'websearch' ||
+    (kind === 'search' && title.includes('web')) ||
+    haystack.includes('fs.read') ||
+    haystack.includes('read') ||
+    /web[- ]?search/.test(title)
+  ) {
     return 'read';
   }
   return 'other';
@@ -158,10 +166,17 @@ function assertAllowedClientRequest(msg, policy, agentName = 'child agent') {
     throw denied(`${agentName} is read-only in this phase; ${msg.method} denied`);
   }
   if (kind === 'permission') {
-    if (!policy.writeFiles && !policy.terminal) {
-      throw denied(`${agentName} is read-only in this phase; session/request_permission denied`);
-    }
     const requestedKind = classifyPermissionRequest(msg?.params);
+    if (requestedKind === 'read') {
+      const readOnlyPermissionAllowed =
+        policy.readFiles || policy.writeFiles || policy.terminal || policy.mcp;
+      if (!readOnlyPermissionAllowed) {
+        throw denied(
+          `${agentName} is not allowed to request read-only tool permission in this phase`,
+        );
+      }
+      return;
+    }
     if (requestedKind === 'write' && !policy.writeFiles) {
       throw denied(`${agentName} is not allowed to request file-write permission in this phase`);
     }

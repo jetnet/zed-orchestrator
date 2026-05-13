@@ -778,7 +778,7 @@ rl.on('line',line=>{
       options:[{optionId:'allow-once',name:'Allow once',kind:'allow_once'}]
     }});
   } else if(msg.id===3) {
-    const denied=!!msg.error && /request_permission denied/.test(msg.error.message || '');
+    const denied=!!msg.error && /terminal permission/.test(msg.error.message || '');
     send({jsonrpc:'2.0',id:promptId,result:{stopReason:'end_turn',content:[{type:'text',text:'permissionDenied='+denied+' caps='+capsOk}]}});
   }
 });
@@ -850,6 +850,153 @@ rl.on('line',line=>{
     assert(
         "child received local permission denial",
         finalText.includes("permission-denied"),
+        finalText,
+    );
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
+async function test_child_request_permission_allows_read_only_search() {
+    console.log(
+        "\n[Test 21b] read-only fetch/web-search permission is proxied",
+    );
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orch-test-"));
+
+    const sub0 = path.join(tmpDir, "permission-read-sub.js");
+    fs.writeFileSync(
+        sub0,
+        `
+const {createInterface}=require('readline');
+const rl=createInterface({input:process.stdin});
+const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+let promptId=null;
+let sawMcpCount=-1;
+rl.on('line',line=>{
+  let msg;try{msg=JSON.parse(line);}catch{return;}
+  if(msg.method==='initialize') {
+    send({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,agentInfo:{name:'sub',version:'1'},agentCapabilities:{mcpCapabilities:{http:true,sse:false}}}});
+  } else if(msg.method==='session/new') {
+    sawMcpCount=Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers.length : -1;
+    send({jsonrpc:'2.0',id:msg.id,result:{sessionId:'child-session'}});
+  } else if(msg.method==='session/prompt') {
+    promptId=msg.id;
+    send({jsonrpc:'2.0',id:3,method:'session/request_permission',params:{
+      sessionId:'child-session',
+      toolCall:{toolCallId:'tool-1',title:'Web search',kind:'fetch',status:'pending'},
+      options:[{optionId:'allow-once',name:'Allow once',kind:'allow_once'}]
+    }});
+  } else if(msg.id===3) {
+    const allowed=!!msg.result && !msg.error;
+    const err=msg.error?.message || '';
+    send({jsonrpc:'2.0',id:promptId,result:{stopReason:'end_turn',content:[{type:'text',text:'permissionAllowed='+allowed+' error='+err+' mcpCount='+sawMcpCount}]}});
+  }
+});
+`,
+    );
+
+    const reviewerPath = path.join(tmpDir, "reviewer.js");
+    fs.writeFileSync(
+        reviewerPath,
+        `
+const {createInterface}=require('readline');
+const rl=createInterface({input:process.stdin});
+const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+rl.on('line',line=>{
+  let msg;try{msg=JSON.parse(line);}catch{return;}
+  if(msg.method==='initialize') send({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,agentInfo:{name:'r',version:'1'},agentCapabilities:{}}});
+  else if(msg.method==='session/new') send({jsonrpc:'2.0',id:msg.id,result:{sessionId:'reviewer-session'}});
+  else if(msg.method==='session/prompt') {
+    const ok=msg.params.prompt[0].text.includes('permissionAllowed=true') && msg.params.prompt[0].text.includes('mcpCount=1');
+    send({jsonrpc:'2.0',id:msg.id,result:{stopReason:'end_turn',content:[{type:'text',text:ok ? 'APPROVED: read-only-permission-proxied' : 'APPROVED: read-only-permission-missing'}]}});
+  }
+});
+`,
+    );
+
+    const cfgPath = path.join(tmpDir, "agents.config.json");
+    fs.writeFileSync(
+        cfgPath,
+        JSON.stringify({
+            maxTurns: 1,
+            maxRetries: 0,
+            agentTimeoutMs: 5000,
+            mcpServers: [
+                {
+                    type: "http",
+                    name: "lazy-mcp",
+                    url: "http://127.0.0.1:8080/mcp",
+                },
+            ],
+            agentGroups: {
+                plan: {
+                    strategy: "parallel_reports",
+                    permissions: {
+                        readFiles: true,
+                        writeFiles: false,
+                        terminal: false,
+                        mcp: true,
+                    },
+                    reviewerPermissions: {
+                        readFiles: true,
+                        writeFiles: false,
+                        terminal: false,
+                        mcp: true,
+                    },
+                    subAgents: [
+                        {
+                            name: "PermissionReadSub",
+                            command: "node",
+                            args: [sub0],
+                            env: {},
+                        },
+                    ],
+                    reviewer: {
+                        name: "Reviewer",
+                        command: "node",
+                        args: [reviewerPath],
+                        env: {},
+                    },
+                },
+            },
+        }),
+    );
+
+    const zedRequests = [];
+    const { result } = await runOrchestrator(cfgPath, tmpDir, {
+        clientCapabilities: {
+            fs: { readTextFile: true, writeTextFile: true },
+            terminal: true,
+        },
+        onRequest: (msg) => {
+            zedRequests.push(msg);
+            if (msg.method === "session/request_permission") {
+                return { outcome: { outcome: "selected", optionId: "allow-once" } };
+            }
+            return {};
+        },
+        sessionMcpServers: [
+            {
+                type: "http",
+                name: "lazy-mcp",
+                url: "http://127.0.0.1:8080/mcp",
+            },
+        ],
+    });
+
+    const finalText = result?.content?.[0]?.text || "";
+    assert(
+        "read-only permission request was proxied to Zed",
+        zedRequests.some((r) => r.method === "session/request_permission"),
+        JSON.stringify(zedRequests.map((r) => r.method)),
+    );
+    assert(
+        "child received approval for read-only permission",
+        finalText.includes("permissionAllowed=true"),
+        finalText,
+    );
+    assert(
+        "child received forwarded MCP server in session/new",
+        finalText.includes("mcpCount=1"),
         finalText,
     );
 
@@ -8933,6 +9080,7 @@ rl.on("line", line => {
         await T(test_unknown_slash_command_is_preserved_for_child_agent);
         await T(test_single_writer_requires_exact_writer_match);
         await T(test_single_writer_reviewer_permissions_are_read_only);
+        await T(test_child_request_permission_allows_read_only_search);
         await T(test_no_retry_after_writer_side_effect);
         await T(test_code_attaches_latest_plan_for_plan_group_only);
         await T(test_code_refuses_tampered_approved_plan);

@@ -478,7 +478,9 @@ command.
 `single_writer` reviewers default to read-only and startup rejects write-capable reviewer policy.
 
 Here, read-only is an ACP proxy policy: the orchestrator masks write/terminal capabilities and
-denies proxied write, terminal, permission, MCP, and unknown client requests according to policy.
+denies proxied write and terminal requests according to policy. Clearly read-only permission
+requests such as file reads or search/fetch-style built-ins are still proxied; unknown client
+methods remain blocked by default.
 It is not an OS filesystem sandbox for the child CLI process. Use `sandboxCommand`/`sandboxArgs`,
 or a provider-native read-only mode you have verified, when you need a stronger non-mutation
 guarantee.
@@ -492,7 +494,8 @@ that wires a curated set of inspection servers.
 
 `allowUnknownClientRequests` (default `false`) is a compatibility escape hatch for unknown future
 ACP client methods; in read-only phases the orchestrator denies any client request that is not
-explicitly classified as fs/terminal/permission.
+explicitly classified as fs/terminal/permission, and permission requests are only proxied when
+they are clearly read-only.
 
 ---
 
