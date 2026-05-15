@@ -887,3 +887,108 @@ Verified bare-binary ACP commands (use after `npm run install-acp-tools`):
 | OpenCode | `opencode` | `["acp"]` |
 | Qwen Code | `qwen` | `["--acp"]` |
 | Kimi Code | `kimi` | `["acp"]` |
+
+### OpenCode provider model options
+
+Model-level `options` are passed via `OPENCODE_CONFIG_CONTENT` (deep-merged with existing config).
+The full list is defined in [`packages/opencode/src/provider/provider.ts`](https://github.com/sst/opencode/blob/main/packages/opencode/src/provider/provider.ts).
+
+#### Anthropic (Claude)
+
+```json
+{ "thinking": { "type": "enabled", "budgetTokens": 16000 } }
+```
+
+Newer models (`claude-opus-4.7`+) support adaptive effort:
+
+```json
+{ "thinking": { "type": "adaptive" }, "effort": "high" }
+```
+
+Variants: `low`, `medium`, `high`, `xhigh`, `max` (model-dependent).
+
+#### OpenAI (GPT)
+
+```json
+{ "reasoningEffort": "medium", "reasoningSummary": "auto", "store": false }
+```
+
+Variants: `none`, `low`, `medium`, `high`, `xhigh` (model- and date-dependent).
+
+#### Google (Gemini)
+
+Gemini 2.5:
+```json
+{ "thinkingConfig": { "includeThoughts": true, "thinkingBudget": 16000 } }
+```
+
+Gemini 3+:
+```json
+{ "thinkingConfig": { "includeThoughts": true, "thinkingLevel": "high" } }
+```
+
+Variants: `minimal`, `low`, `medium`, `high`, `max`.
+
+#### Kimi / Moonshot (`kimi-k2`)
+
+Via Anthropic SDK:
+```json
+{ "thinking": { "type": "enabled", "budgetTokens": 16000 } }
+```
+
+Via OpenAI-compatible / baseten:
+```json
+{ "chat_template_args": { "enable_thinking": true } }
+```
+
+#### Qwen (Alibaba)
+
+```json
+{ "enable_thinking": true }
+```
+
+#### Minimax / GLM (zhipuai / zai)
+
+```json
+{ "thinking": { "type": "enabled", "clear_thinking": false } }
+```
+
+#### Other providers
+
+| Provider | Option shape |
+|---|---|
+| Amazon Bedrock (Anthropic) | `{ "reasoningConfig": { "type": "adaptive", "maxReasoningEffort": "high" } }` |
+| Amazon Bedrock (Nova) | `{ "reasoningConfig": { "type": "enabled", "maxReasoningEffort": "medium" } }` |
+| Azure | `{ "reasoningEffort": "medium", "reasoningSummary": "auto", "store": false }` |
+| xAI / Grok | `{ "reasoningEffort": "low" }` or `{ "reasoningEffort": "high" }` |
+| Mistral | `{ "reasoningEffort": "high" }` |
+| Groq | `{ "reasoningEffort": "low" }` / `"medium"` / `"high"` |
+| Cerebras | `{ "reasoningEffort": "low" }` / `"medium"` / `"high"` |
+| Venice | `{ "reasoningEffort": "..." }` or `{ "veniceParameters": { "disableThinking": true } }` |
+| OpenRouter | `{ "reasoning": { "effort": "high" } }` (for reasoning models) |
+
+#### Setting options via env
+
+```bash
+export OPENCODE_CONFIG_CONTENT='{
+  "provider": {
+    "anthropic": {
+      "models": {
+        "claude-opus-4-6": {
+          "options": { "thinking": { "type": "enabled", "budgetTokens": 16000 } }
+        }
+      }
+    }
+  }
+}'
+```
+
+Or inline in `agents.config.json`:
+
+```json
+{
+  "env": {
+    "OPENCODE_CONFIG_CONTENT": "{\"provider\":{\"anthropic\":{\"models\":{\"claude-opus-4-6\":{\"options\":{\"thinking\":{\"type\":\"enabled\",\"budgetTokens\":16000}}}}}}}"
+  }
+}
+```
